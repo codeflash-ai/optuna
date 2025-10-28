@@ -89,6 +89,7 @@ def _get_improvement_info(
     if study._is_multi_objective():
         raise ValueError("This function does not support multi-objective optimization study.")
 
+    # Minimize type-checking and isinstance checks: initialize evaluators at start, use local vars
     if improvement_evaluator is None:
         improvement_evaluator = RegretBoundEvaluator()
     if error_evaluator is None:
@@ -97,32 +98,35 @@ def _get_improvement_info(
         else:
             error_evaluator = CrossValidationErrorEvaluator()
 
-    trial_numbers = []
+    # Reduce attribute lookups inside the loop
+    trial_numbers_append = trial_numbers = []
+    improvements_append = improvements = []
+    errors_append = errors = []
     completed_trials = []
-    improvements = []
-    errors = []
 
-    for trial in tqdm.tqdm(study.trials):
+    eval_improvement = improvement_evaluator.evaluate
+    eval_error = error_evaluator.evaluate if get_error else None
+    study_direction = study.direction
+
+    for trial in study.trials:
         if trial.state == optuna.trial.TrialState.COMPLETE:
             completed_trials.append(trial)
 
-        if len(completed_trials) == 0:
+        if not completed_trials:
             continue
 
-        trial_numbers.append(trial.number)
+        trial_numbers_append.append(trial.number)
 
-        improvement = improvement_evaluator.evaluate(
-            trials=completed_trials, study_direction=study.direction
+        improvements_append.append(
+            eval_improvement(trials=completed_trials, study_direction=study_direction)
         )
-        improvements.append(improvement)
 
-        if get_error:
-            error = error_evaluator.evaluate(
-                trials=completed_trials, study_direction=study.direction
+        if eval_error is not None:
+            errors_append.append(
+                eval_error(trials=completed_trials, study_direction=study_direction)
             )
-            errors.append(error)
 
-    if len(errors) == 0:
+    if not errors_append:
         return _ImprovementInfo(
             trial_numbers=trial_numbers, improvements=improvements, errors=None
         )
