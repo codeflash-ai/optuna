@@ -144,8 +144,8 @@ def _select_parent(
     dominates: Callable[[FrozenTrial, FrozenTrial, Sequence[StudyDirection]], bool],
 ) -> FrozenTrial:
     population_size = len(parent_population)
-    candidate0 = parent_population[rng.choice(population_size)]
-    candidate1 = parent_population[rng.choice(population_size)]
+    candidate0 = parent_population[rng.randint(population_size)]
+    candidate1 = parent_population[rng.randint(population_size)]
 
     # TODO(ohta): Consider crowding distance.
     if dominates(candidate0, candidate1, study.directions):
