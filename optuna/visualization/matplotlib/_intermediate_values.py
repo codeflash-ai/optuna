@@ -49,15 +49,18 @@ def _get_intermediate_plot(info: _IntermediatePlotInfo) -> "Axes":
 
     trial_infos = info.trial_infos
 
+    cmap_colors = [cmap(i) for i in range(len(trial_infos))]
     for i, tinfo in enumerate(trial_infos):
-        ax.plot(
-            tuple((x for x, _ in tinfo.sorted_intermediate_values)),
-            tuple((y for _, y in tinfo.sorted_intermediate_values)),
-            color=cmap(i) if tinfo.feasible else "#CCCCCC",
-            marker=".",
-            alpha=0.7,
-            label=f"Trial{tinfo.trial_number}",
-        )
+        if tinfo.sorted_intermediate_values:
+            x_vals, y_vals = zip(*tinfo.sorted_intermediate_values)
+            ax.plot(
+                x_vals,
+                y_vals,
+                color=cmap_colors[i] if tinfo.feasible else "#CCCCCC",
+                marker=".",
+                alpha=0.7,
+                label=f"Trial{tinfo.trial_number}",
+            )
 
     if len(trial_infos) >= 2:
         ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", borderaxespad=0.0)
