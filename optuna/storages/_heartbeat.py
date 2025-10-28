@@ -133,7 +133,7 @@ class HeartbeatThread(BaseHeartbeatThread):
 
 
 def get_heartbeat_thread(trial_id: int, storage: BaseStorage) -> BaseHeartbeatThread:
-    if is_heartbeat_enabled(storage):
+    if isinstance(storage, BaseHeartbeat) and storage.get_heartbeat_interval() is not None:
         assert isinstance(storage, BaseHeartbeat)
         return HeartbeatThread(trial_id, storage)
     else:
