@@ -461,12 +461,16 @@ class JournalStorageReplayResult:
         if study_id not in self._studies:
             raise KeyError(NOT_FOUND_MSG)
 
-        frozen_trials: list[FrozenTrial] = []
-        for trial_id in self._study_id_to_trial_ids[study_id]:
-            trial = self._trials[trial_id]
-            if states is None or trial.state in states:
-                frozen_trials.append(trial)
-        return frozen_trials
+        trial_ids = self._study_id_to_trial_ids[study_id]
+        trials = self._trials
+        if states is None:
+            return [trials[trial_id] for trial_id in trial_ids]
+        states_set = states if isinstance(states, set) else set(states)
+        return [
+            trial
+            for trial_id in trial_ids
+            if (trial := trials[trial_id]).state in states_set
+        ]
 
     @property
     def worker_id(self) -> str:
