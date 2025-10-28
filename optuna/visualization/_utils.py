@@ -83,7 +83,7 @@ def _is_numerical(trials: list[FrozenTrial], param: str) -> bool:
         if param not in trial.params:
             continue
         dist = trial.distributions[param]
-        if isinstance(dist, (IntDistribution, FloatDistribution)):
+        if type(dist) is IntDistribution or type(dist) is FloatDistribution:
             return True
         elif isinstance(dist, CategoricalDistribution):
             # NOTE: Although it is a bit odd to do so, we keep it as is only for visualization.
