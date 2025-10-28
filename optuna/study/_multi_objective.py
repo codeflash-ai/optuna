@@ -97,25 +97,35 @@ def _fast_non_domination_rank(
 
     ranks = np.full(len(loss_values), -1, dtype=int)
     is_penalty_nan = np.isnan(penalty)
-    is_feasible = np.logical_and(~is_penalty_nan, penalty <= 0)
-    is_infeasible = np.logical_and(~is_penalty_nan, penalty > 0)
+    is_feasible = (~is_penalty_nan) & (penalty <= 0)
+    is_infeasible = (~is_penalty_nan) & (penalty > 0)
 
     # First, we calculate the domination rank for feasible trials.
-    ranks[is_feasible] = _calculate_nondomination_rank(loss_values[is_feasible], n_below=n_below)
-    n_below -= int(np.count_nonzero(is_feasible))
+    feasible_count = np.count_nonzero(is_feasible)
+    if feasible_count:
+        feasible_ranks = _calculate_nondomination_rank(loss_values[is_feasible], n_below=n_below)
+        ranks[is_feasible] = feasible_ranks
+        n_below -= feasible_count
 
     # Second, we calculate the domination rank for infeasible trials.
-    top_rank_infeasible = np.max(ranks[is_feasible], initial=-1) + 1
-    ranks[is_infeasible] = top_rank_infeasible + _calculate_nondomination_rank(
-        penalty[is_infeasible][:, np.newaxis], n_below=n_below
-    )
-    n_below -= int(np.count_nonzero(is_infeasible))
+    infeasible_count = np.count_nonzero(is_infeasible)
+    if infeasible_count:
+        top_rank_infeasible = np.max(ranks[is_feasible], initial=-1) + 1
+        infeasible_ranks = _calculate_nondomination_rank(
+            penalty[is_infeasible][:, np.newaxis], n_below=n_below
+        )
+        ranks[is_infeasible] = top_rank_infeasible + infeasible_ranks
+        n_below -= infeasible_count
 
     # Third, we calculate the domination rank for trials with no penalty information.
-    top_rank_penalty_nan = np.max(ranks[~is_penalty_nan], initial=-1) + 1
-    ranks[is_penalty_nan] = top_rank_penalty_nan + _calculate_nondomination_rank(
-        loss_values[is_penalty_nan], n_below=n_below
-    )
+    penalty_nan_count = np.count_nonzero(is_penalty_nan)
+    if penalty_nan_count:
+        top_rank_penalty_nan = np.max(ranks[~is_penalty_nan], initial=-1) + 1
+        penalty_nan_ranks = _calculate_nondomination_rank(
+            loss_values[is_penalty_nan], n_below=n_below
+        )
+        ranks[is_penalty_nan] = top_rank_penalty_nan + penalty_nan_ranks
+
     assert np.all(ranks != -1), "All the rank must be updated."
     return ranks
 

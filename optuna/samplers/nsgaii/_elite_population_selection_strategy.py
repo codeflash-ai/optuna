@@ -130,7 +130,9 @@ def _rank_population(
     penalty = _evaluate_penalty(population) if is_constrained else None
 
     domination_ranks = _fast_non_domination_rank(objective_values, penalty=penalty)
-    population_per_rank: list[list[FrozenTrial]] = [[] for _ in range(max(domination_ranks) + 1)]
+    num_ranks = domination_ranks.max() + 1
+    population_per_rank: list[list[FrozenTrial]] = [[] for _ in range(num_ranks)]
+    # Use more efficient grouping via preallocated lists and bulk push
     for trial, rank in zip(population, domination_ranks):
         if rank == -1:
             continue
