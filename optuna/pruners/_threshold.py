@@ -10,15 +10,11 @@ from optuna.pruners._percentile import _is_first_in_interval_step
 
 def _check_value(value: Any) -> float:
     try:
-        # For convenience, we allow users to report a value that can be cast to `float`.
-        value = float(value)
+        return float(value)
     except (TypeError, ValueError):
-        message = "The `value` argument is of type '{}' but supposed to be a float.".format(
-            type(value).__name__
-        )
-        raise TypeError(message) from None
-
-    return value
+        raise TypeError(
+            f"The `value` argument is of type '{type(value).__name__}' but supposed to be a float."
+        ) from None
 
 
 class ThresholdPruner(BasePruner):
