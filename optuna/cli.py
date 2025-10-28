@@ -43,15 +43,17 @@ def _check_storage_url(storage_url: str | None) -> str:
     if storage_url is not None:
         return storage_url
 
-    env_storage = os.environ.get("OPTUNA_STORAGE")
-    if env_storage is not None:
-        warnings.warn(
-            "Specifying the storage url via 'OPTUNA_STORAGE' environment variable"
-            " is an experimental feature. The interface can change in the future.",
-            ExperimentalWarning,
-        )
-        return env_storage
-    raise CLIUsageError("Storage URL is not specified.")
+    try:
+        env_storage = os.environ["OPTUNA_STORAGE"]
+    except KeyError:
+        raise CLIUsageError("Storage URL is not specified.")
+
+    warnings.warn(
+        "Specifying the storage url via 'OPTUNA_STORAGE' environment variable"
+        " is an experimental feature. The interface can change in the future.",
+        ExperimentalWarning,
+    )
+    return env_storage
 
 
 def _get_storage(storage_url: str | None, storage_class: str | None) -> BaseStorage:
