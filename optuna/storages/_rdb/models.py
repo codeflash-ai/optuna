@@ -342,8 +342,7 @@ class TrialSystemAttributeModel(BaseModel):
     ) -> "TrialSystemAttributeModel" | None:
         attribute = (
             session.query(cls)
-            .filter(cls.trial_id == trial.trial_id)
-            .filter(cls.key == key)
+            .filter(cls.trial_id == trial.trial_id, cls.key == key)
             .one_or_none()
         )
 
