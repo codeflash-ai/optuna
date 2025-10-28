@@ -198,18 +198,32 @@ def _associate_individuals_with_reference_points(
     # distance_from_reference_lines is a ndarray of shape (n, p), where n is the size of the
     # population and p is the number of reference points. Its (i,j) entry keeps distance between
     # the i-th individual values and the j-th reference line.
-    reference_point_norm_squared = np.linalg.norm(reference_points, axis=1) ** 2
-    perpendicular_vectors_to_reference_lines = np.einsum(
-        "ni,pi,p,pm->npm",
-        objective_matrix,
-        reference_points,
-        1 / reference_point_norm_squared,
-        reference_points,
-    )
-    distance_from_reference_lines = np.linalg.norm(
-        objective_matrix[:, np.newaxis, :] - perpendicular_vectors_to_reference_lines,
-        axis=2,
-    )
+
+    # Precompute values used in projection (moving computation outside einsum and avoiding repeated calculation)
+    # Instead of einsum, use efficient explicit batched dot products and broadcasting.
+    # This avoids overhead from the more general einsum and improves cache locality.
+
+    # Normalize reference point direction vectors
+    reference_point_norm_squared = np.sum(reference_points ** 2, axis=1)  # shape (p,)
+    inv_reference_point_norm_squared = 1.0 / reference_point_norm_squared  # shape (p,)
+    # Compute dot product between all individuals and all reference points
+    dots = objective_matrix @ reference_points.T  # shape (n, p)
+    # Coefficients for projections
+    coefs = dots * inv_reference_point_norm_squared  # shape (n, p)
+    # Expand dims for broadcasting: individuals (n, 1, m), reference (1, p, m)
+    # The perpendicular projection: proj = coef[..., np.newaxis] * reference_points
+    # Then perp = objective_matrix[:, np.newaxis, :] - proj
+    # Instead of forming the perpendicular vectors, compute the squared distances directly
+    # ||a - (coef)b||^2 = ||a||^2 - 2*coef*<a,b> + coef^2*||b||^2
+    obj_norm_squared = np.sum(objective_matrix ** 2, axis=1)[:, np.newaxis]  # (n, 1)
+    term1 = obj_norm_squared  # (n, 1)
+    term2 = -2 * coefs * dots  # (n, p)
+    term3 = (coefs ** 2) * reference_point_norm_squared  # (n, p)
+    distance_from_reference_lines_squared = term1 + term2 + term3  # (n, p)
+    # distances are the sqrt of that (m point-wise positive)
+    # Numerical safety: avoid negative values due to round-off
+    np.maximum(distance_from_reference_lines_squared, 0, out=distance_from_reference_lines_squared)
+    distance_from_reference_lines = np.sqrt(distance_from_reference_lines_squared)
     closest_reference_points: np.ndarray = np.argmin(distance_from_reference_lines, axis=1)
     distance_reference_points: np.ndarray = np.min(distance_from_reference_lines, axis=1)
 
