@@ -62,7 +62,7 @@ def _get_hypervolume_history_plot(
 ) -> "Axes":
     # Set up the graph style.
     plt.style.use("ggplot")  # Use ggplot style sheet for similar outputs to plotly.
-    _, ax = plt.subplots()
+    ax = plt.subplot()
     ax.set_title("Hypervolume History Plot")
     ax.set_xlabel("Trial")
     ax.set_ylabel("Hypervolume")
