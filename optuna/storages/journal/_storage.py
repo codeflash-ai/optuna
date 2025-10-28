@@ -490,15 +490,19 @@ class JournalStorageReplayResult:
         study_name = log["study_name"]
         directions = [StudyDirection(d) for d in log["directions"]]
 
-        if study_name in [s.study_name for s in self._studies.values()]:
-            if self._is_issued_by_this_worker(log):
-                raise DuplicatedStudyError(
-                    "Another study with name '{}' already exists. "
-                    "Please specify a different name, or reuse the existing one "
-                    "by setting `load_if_exists` (for Python API) or "
-                    "`--skip-if-exists` flag (for CLI).".format(study_name)
-                )
-            return
+        # Optimize for checking duplicate study name by avoiding list comprehension
+        # Build a set of current study names for O(1) lookup if studies exist
+        if self._studies:
+            study_names = set(s.study_name for s in self._studies.values())
+            if study_name in study_names:
+                if self._is_issued_by_this_worker(log):
+                    raise DuplicatedStudyError(
+                        "Another study with name '{}' already exists. "
+                        "Please specify a different name, or reuse the existing one "
+                        "by setting `load_if_exists` (for Python API) or "
+                        "`--skip-if-exists` flag (for CLI).".format(study_name)
+                    )
+                return
 
         study_id = self._next_study_id
         self._next_study_id += 1
