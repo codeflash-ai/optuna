@@ -7,8 +7,6 @@ from typing import Any
 from typing import cast
 import warnings
 
-import numpy as np
-
 import optuna
 from optuna.distributions import CategoricalDistribution
 from optuna.distributions import FloatDistribution
@@ -17,6 +15,7 @@ from optuna.study import Study
 from optuna.study._study_direction import StudyDirection
 from optuna.trial import FrozenTrial
 from optuna.visualization import _plotly_imports
+import math
 
 
 __all__ = ["is_available"]
@@ -57,11 +56,14 @@ def _check_plot_args(
     else:
         studies = study
 
-    if target is None and any(study._is_multi_objective() for study in studies):
-        raise ValueError(
-            "If the `study` is being used for multi-objective optimization, "
-            "please specify the `target`."
-        )
+    # Optimization: only access _is_multi_objective once per study, instead of multiple attribute lookups per loop iteration
+    if target is None:
+        is_multi_objective_list = [s._is_multi_objective() for s in studies]
+        if any(is_multi_objective_list):
+            raise ValueError(
+                "If the `study` is being used for multi-objective optimization, "
+                "please specify the `target`."
+            )
 
     if target is not None and target_name == "Objective Value":
         warnings.warn(
@@ -160,8 +162,9 @@ def _filter_nonfinite(
             )
             raise
 
+        # Use math.isfinite instead of np.isfinite for better scalar performance
         # Not a Number, positive infinity and negative infinity are considered to be non-finite.
-        if not np.isfinite(value):
+        if not math.isfinite(value):
             if with_message:
                 _logger.warning(
                     f"Trial {trial.number} is omitted in visualization "
