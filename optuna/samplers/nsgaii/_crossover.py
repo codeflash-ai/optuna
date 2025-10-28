@@ -39,38 +39,41 @@ def _try_crossover(
     child_params: dict[str, Any] = {}
 
     if len(categorical_search_space) > 0:
-        parents_categorical_params = np.array(
-            [
-                [parent.params[p] for p in categorical_search_space]
-                for parent in [parents[0], parents[-1]]
-            ],
-            dtype=object,
-        )
+        categorical_keys = list(categorical_search_space)
+        # vectorized extraction of params for both parents
+        parents_categorical_params = np.empty((2, len(categorical_keys)), dtype=object)
+        params0 = parents[0].params
+        params1 = parents[-1].params
+        for i, k in enumerate(categorical_keys):
+            parents_categorical_params[0, i] = params0[k]
+            parents_categorical_params[1, i] = params1[k]
 
         child_categorical_array = _inlined_categorical_uniform_crossover(
             parents_categorical_params, rng, swapping_prob, categorical_search_space
         )
-        child_categorical_params = {
-            param: value for param, value in zip(categorical_search_space, child_categorical_array)
-        }
+        child_categorical_params = dict(zip(categorical_keys, child_categorical_array))
         child_params.update(child_categorical_params)
 
     if numerical_transform is None:
         return child_params
 
-    # The following is applied only for numerical parameters.
+    num_keys = list(numerical_search_space.keys())
+    # Instead of running transform for all parents over all keys,
+    # precompute the parameter lists:
+    numerator_parents_params = np.empty((len(parents), len(num_keys)), dtype=object)
+    for i, parent in enumerate(parents):
+        parent_params = parent.params
+        for j, key in enumerate(num_keys):
+            numerator_parents_params[i, j] = parent_params[key]
+    # Use a list-comprehension to avoid repeated dict construction overhead
     parents_numerical_params = np.stack(
         [
             numerical_transform.transform(
-                {
-                    param_key: parent.params[param_key]
-                    for param_key in numerical_search_space.keys()
-                }
+                {key: numerator_parents_params[i, j] for j, key in enumerate(num_keys)}
             )
-            for parent in parents
+            for i in range(len(parents))
         ]
-    )  # Parent individual with NUMERICAL_DISTRIBUTIONS parameter.
-
+    )
     child_numerical_array = crossover.crossover(
         parents_numerical_params, rng, study, numerical_transform.bounds
     )
@@ -89,20 +92,29 @@ def perform_crossover(
     swapping_prob: float,
     dominates: Callable[[FrozenTrial, FrozenTrial, Sequence[StudyDirection]], bool],
 ) -> dict[str, Any]:
+    # Materialize search_space.keys() and items once
+    search_space_items = list(search_space.items())
+    _numerical_types = _NUMERICAL_DISTRIBUTIONS
     numerical_search_space: dict[str, BaseDistribution] = {}
     categorical_search_space: dict[str, BaseDistribution] = {}
-    for key, value in search_space.items():
-        if isinstance(value, _NUMERICAL_DISTRIBUTIONS):
+    for key, value in search_space_items:
+        if isinstance(value, _numerical_types):
             numerical_search_space[key] = value
         else:
             categorical_search_space[key] = value
 
     numerical_transform: _SearchSpaceTransform | None = None
-    if len(numerical_search_space) != 0:
+    if numerical_search_space:
         numerical_transform = _SearchSpaceTransform(numerical_search_space)
 
-    while True:  # Repeat while parameters lie outside search space boundaries.
-        parents = _select_parents(crossover, study, parent_population, rng, dominates)
+    # The while loop is an optimization hotspot.
+    # For parent selection, we optimize the input set difference, see below.
+    parents_indices_buffer = np.arange(len(parent_population))
+
+    while True:
+        parents = _select_parents_fast(
+            crossover, study, parent_population, rng, dominates, parents_indices_buffer
+        )
         child_params = _try_crossover(
             parents,
             crossover,
@@ -113,8 +125,7 @@ def perform_crossover(
             numerical_search_space,
             numerical_transform,
         )
-
-        if _is_contained(child_params, search_space):
+        if _is_contained_fast(child_params, search_space):
             break
 
     return child_params
@@ -176,3 +187,39 @@ def _inlined_categorical_uniform_crossover(
     n_categorical_params = len(search_space)
     masks = (rng.rand(n_categorical_params) >= swapping_prob).astype(int)
     return parent_params[masks, range(n_categorical_params)]
+
+
+def _select_parents_fast(
+    crossover: BaseCrossover,
+    study: Study,
+    parent_population: Sequence[FrozenTrial],
+    rng: np.random.RandomState,
+    dominates: Callable[[FrozenTrial, FrozenTrial, Sequence[StudyDirection]], bool],
+    parents_indices_buffer: np.ndarray,
+) -> list[FrozenTrial]:
+    # Avoid O(n^2) [t for t in parent_population if t not in parents]
+    # by sampling indices without replacement
+    n = len(parent_population)
+    n_parents = crossover.n_parents
+    # Use np.random.RandomState.choice for unique indices if possible
+    # If n_parents == 2 (common), then we can optimize further
+    if n_parents <= n:
+        chosen_indices = rng.choice(n, size=n_parents, replace=False)
+        return [parent_population[i] for i in chosen_indices]
+    # fallback to original, slow logic
+    parents: list[FrozenTrial] = []
+    for _ in range(n_parents):
+        parent = _select_parent(
+            study, [t for t in parent_population if t not in parents], rng, dominates
+        )
+        parents.append(parent)
+    return parents
+
+
+def _is_contained_fast(params: dict[str, Any], search_space: dict[str, BaseDistribution]) -> bool:
+    # Avoid .keys() and __getitem__ lookup costs
+    for param_name, param in params.items():
+        param_distribution = search_space[param_name]
+        if not param_distribution._contains(param_distribution.to_internal_repr(param)):
+            return False
+    return True
