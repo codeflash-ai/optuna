@@ -92,13 +92,15 @@ def _evaluate_penalty(population: Sequence[FrozenTrial]) -> np.ndarray:
         feasible/infeasible and None means that the trial does not have constraint values.
     """
 
-    penalty: list[float] = []
-    for trial in population:
-        constraints = trial.system_attrs.get(_CONSTRAINTS_KEY)
-        if constraints is None:
-            penalty.append(np.nan)
-        else:
-            penalty.append(sum(v for v in constraints if v > 0))
+    # Use list comprehension for better performance
+    penalty = [
+        (
+            np.nan
+            if (constraints := trial.system_attrs.get(_CONSTRAINTS_KEY)) is None
+            else sum(v for v in constraints if v > 0)
+        )
+        for trial in population
+    ]
     return np.array(penalty)
 
 
