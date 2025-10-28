@@ -20,24 +20,29 @@ def _solve_hssp_2d(
     # rank_i_loss_vals is unique-lexsorted in solve_hssp.
     sorted_indices = np.arange(rank_i_loss_vals.shape[0])
     sorted_loss_vals = rank_i_loss_vals.copy()
-    # The diagonal points for each rectangular to calculate the hypervolume contributions.
-    rect_diags = np.repeat(reference_point[np.newaxis, :], n_trials, axis=0)
+    active_mask = np.ones(n_trials, dtype=bool)
     selected_indices = np.zeros(subset_size, dtype=int)
+    rect_diags_0 = np.full(n_trials, reference_point[0])
+    rect_diags_1 = np.full(n_trials, reference_point[1])
+    
     for i in range(subset_size):
-        contribs = np.prod(rect_diags - sorted_loss_vals, axis=-1)
-        max_index = np.argmax(contribs)
+        active_indices = np.flatnonzero(active_mask)
+        contribs = (rect_diags_0[active_indices] - sorted_loss_vals[active_indices, 0]) * (
+            rect_diags_1[active_indices] - sorted_loss_vals[active_indices, 1]
+        )
+        max_pos = np.argmax(contribs)
+        max_index = active_indices[max_pos]
         selected_indices[i] = rank_i_indices[sorted_indices[max_index]]
         loss_vals = sorted_loss_vals[max_index].copy()
 
-        keep = np.ones(n_trials - i, dtype=bool)
-        keep[max_index] = False
-        # Remove the chosen point.
-        sorted_indices = sorted_indices[keep]
-        rect_diags = rect_diags[keep]
-        sorted_loss_vals = sorted_loss_vals[keep]
+        active_mask[max_index] = False
         # Update the diagonal points for each hypervolume contribution calculation.
-        rect_diags[:max_index, 0] = np.minimum(loss_vals[0], rect_diags[:max_index, 0])
-        rect_diags[max_index:, 1] = np.minimum(loss_vals[1], rect_diags[max_index:, 1])
+        before_indices = active_indices[:max_pos]
+        after_indices = active_indices[max_pos+1:]
+        if before_indices.size > 0:
+            rect_diags_0[before_indices] = np.minimum(loss_vals[0], rect_diags_0[before_indices])
+        if after_indices.size > 0:
+            rect_diags_1[after_indices] = np.minimum(loss_vals[1], rect_diags_1[after_indices])
 
     return selected_indices
 
