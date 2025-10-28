@@ -75,14 +75,25 @@ def _get_slice_subplot_info(
         constraints=[],
     )
 
+    # Localize variables to avoid attribute lookups in the loop
+    x_append = plot_info.x.append
+    y_append = plot_info.y.append
+    trial_numbers_append = plot_info.trial_numbers.append
+    constraints_append = plot_info.constraints.append
+    param_in = param
+    get_constraints = _CONSTRAINTS_KEY
+
     for t in trials:
-        if param not in t.params:
+        t_params = t.params
+        if param_in not in t_params:
             continue
-        plot_info.x.append(t.params[param])
-        plot_info.y.append(target(t))
-        plot_info.trial_numbers.append(t.number)
-        constraints = t.system_attrs.get(_CONSTRAINTS_KEY)
-        plot_info.constraints.append(constraints is None or all([x <= 0.0 for x in constraints]))
+        x_append(t_params[param_in])
+        y_append(target(t))
+        trial_numbers_append(t.number)
+
+        constraints = t.system_attrs.get(get_constraints)
+        # Use generator expression in all() instead of list comprehension to improve speed/memory
+        constraints_append(constraints is None or all(x <= 0.0 for x in constraints))
 
     return plot_info
 
