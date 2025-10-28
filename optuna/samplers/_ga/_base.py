@@ -98,33 +98,31 @@ class BaseGASampler(BaseSampler, abc.ABC):
         Returns:
             Generation number of the given trial.
         """
-        generation = trial.system_attrs.get(self._get_generation_key(), None)
+        generation_key = self._get_generation_key()
+        generation = trial.system_attrs.get(generation_key, None)
         if generation is not None:
             return generation
 
+        # Optimization: Only scan trials once and count generations
         trials = study._get_trials(deepcopy=False, states=[TrialState.COMPLETE], use_cache=True)
+        # Use a dict to count generations for completed trials
+        generation_counts = {}
+        max_generation = 0
+        for t in trials:
+            gen = t.system_attrs.get(generation_key, -1)
+            if gen >= 0:
+                generation_counts[gen] = generation_counts.get(gen, 0) + 1
+                if gen > max_generation:
+                    max_generation = gen
 
-        max_generation, max_generation_count = 0, 0
-
-        for t in reversed(trials):
-            generation = t.system_attrs.get(self._get_generation_key(), -1)
-
-            if generation < max_generation:
-                continue
-            elif generation > max_generation:
-                max_generation = generation
-                max_generation_count = 1
-            else:
-                max_generation_count += 1
+        max_generation_count = generation_counts.get(max_generation, 0)
 
         assert self._population_size is not None, "Population size must be set."
         if max_generation_count < self._population_size:
             generation = max_generation
         else:
             generation = max_generation + 1
-        study._storage.set_trial_system_attr(
-            trial._trial_id, self._get_generation_key(), generation
-        )
+        study._storage.set_trial_system_attr(trial._trial_id, generation_key, generation)
         return generation
 
     def get_population(self, study: optuna.Study, generation: int) -> list[FrozenTrial]:
@@ -164,20 +162,19 @@ class BaseGASampler(BaseSampler, abc.ABC):
         if generation == 0:
             return []
 
-        study_system_attrs = study._storage.get_study_system_attrs(study._study_id)
-        cached_parent_population_ids = study_system_attrs.get(
-            self._get_parent_cache_key_prefix() + str(generation), None
-        )
+        system_attrs = study._storage.get_study_system_attrs(study._study_id)
+        parent_cache_key = self._get_parent_cache_key_prefix() + str(generation)
+        cached_parent_population_ids = system_attrs.get(parent_cache_key, None)
 
         if cached_parent_population_ids is not None:
             trials = study._get_trials(deepcopy=False)
-            parent_population_ids = set(cached_parent_population_ids)
-            return [trial for trial in trials if trial._trial_id in parent_population_ids]
+            parent_population_ids_set = set(cached_parent_population_ids)
+            return [trial for trial in trials if trial._trial_id in parent_population_ids_set]
         else:
             parent_population = self.select_parent(study, generation)
             study._storage.set_study_system_attr(
                 study._study_id,
-                self._get_parent_cache_key_prefix() + str(generation),
+                parent_cache_key,
                 [trial._trial_id for trial in parent_population],
             )
             return parent_population
