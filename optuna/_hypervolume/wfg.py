@@ -57,9 +57,12 @@ def _compute_hv(sorted_loss_vals: np.ndarray, reference_point: np.ndarray) -> fl
 
     inclusive_hvs = (reference_point - sorted_loss_vals).prod(axis=-1)
     # c.f. Eqs. (6) and (7) of ``A Fast Way of Calculating Exact Hypervolumes``.
-    limited_sols_array = np.maximum(sorted_loss_vals[:, np.newaxis], sorted_loss_vals)
     return inclusive_hvs[-1] + sum(
-        _compute_exclusive_hv(limited_sols_array[i, i + 1 :], inclusive_hvs[i], reference_point)
+        _compute_exclusive_hv(
+            np.maximum(sorted_loss_vals[i], sorted_loss_vals[i + 1 :]),
+            inclusive_hvs[i],
+            reference_point,
+        )
         for i in range(inclusive_hvs.size - 1)
     )
 
@@ -68,38 +71,36 @@ def _compute_exclusive_hv(
     limited_sols: np.ndarray, inclusive_hv: float, reference_point: np.ndarray
 ) -> float:
     assert limited_sols.shape[0] >= 1
-    if limited_sols.shape[0] <= 3:
-        # NOTE(nabenabe): Don't use _is_pareto_front for 3 or fewer points to avoid its overhead.
-        return inclusive_hv - _compute_hv(limited_sols, reference_point)
+    n_points = limited_sols.shape[0]
 
-    # NOTE(nabenabe): As the following line is a hack for speedup, I will describe several
-    # important points to note. Even if we do not run _is_pareto_front below or use
-    # assume_unique_lexsorted=False instead, the result of this function does not change, but this
-    # function simply becomes slower.
-    #
-    # For simplicity, I call an array ``quasi-lexsorted`` if it is sorted by the first objective.
-    #
-    # Reason why it will be faster with _is_pareto_front
-    #   Hypervolume of a given solution set and a reference point does not change even when we
-    #   remove non Pareto solutions from the solution set. However, the calculation becomes slower
-    #   if the solution set contains many non Pareto solutions. By removing some obvious non Pareto
-    #   solutions, the calculation becomes faster.
-    #
-    # Reason why assume_unique_lexsorted must be True for _is_pareto_front
-    #   assume_unique_lexsorted=True actually checks weak dominance and solutions will be weakly
-    #   dominated if there are duplications, so we can remove duplicated solutions by this option.
-    #   In other words, assume_unique_lexsorted=False may significantly slow down when limited_sols
-    #   has many duplicated Pareto solutions because this function becomes an exponential algorithm
-    #   without duplication removal.
-    #
-    # NOTE(nabenabe): limited_sols can be non-unique and/or non-lexsorted, so I will describe why
-    # it is fine.
-    #
-    # Reason why we can specify assume_unique_lexsorted=True even when limited_sols is not
-    #   All ``False`` in on_front will be correct (, but it may not be the case for ``True``) even
-    #   if limited_sols is not unique or not lexsorted as long as limited_sols is quasi-lexsorted,
-    #   which is guaranteed. As mentioned earlier, if all ``False`` in on_front is correct, the
-    #   result of this function does not change.
+    # Optimize case for <= 3 points: avoid Python for-loop in _compute_hv
+    if n_points == 1:
+        diff = reference_point - limited_sols[0]
+        hv = float(np.prod(diff))
+        return inclusive_hv - hv
+    elif n_points == 2:
+        v0, v1 = limited_sols[0], limited_sols[1]
+        diff0 = reference_point - v0
+        diff1 = reference_point - v1
+        max_v0v1 = np.maximum(v0, v1)
+        diff_intersec = reference_point - max_v0v1
+        hv1 = np.prod(diff0)
+        hv2 = np.prod(diff1)
+        intersec = np.prod(diff_intersec)
+        return inclusive_hv - (hv1 + hv2 - intersec)
+    elif n_points == 3:
+        # (slightly less preferred: reuse _compute_hv's optimized path for 3 points)
+        # Vectorized inclusive_hvs
+        inclusive_hvs = np.prod(reference_point - limited_sols, axis=-1)
+        limited_sols_array = np.maximum(limited_sols[:, np.newaxis], limited_sols)
+        total_hv = inclusive_hvs[-1]
+        size = inclusive_hvs.size
+        for i in range(size - 1):
+            sli = limited_sols_array[i, i + 1 :]
+            total_hv += _compute_exclusive_hv(sli, inclusive_hvs[i], reference_point)
+        return inclusive_hv - total_hv
+
+    # For general case, call Pareto filtering for maximal speed.
     on_front = _is_pareto_front(limited_sols, assume_unique_lexsorted=True)
     return inclusive_hv - _compute_hv(limited_sols[on_front], reference_point)
 
