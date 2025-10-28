@@ -300,4 +300,7 @@ def _get_dims_from_info(info: _ParallelCoordinateInfo) -> list[dict[str, Any]]:
 
 
 def _truncate_label(label: str) -> str:
-    return label if len(label) < 20 else "{}...".format(label[:17])
+    # Use string concatenation and avoid .format() for efficiency
+    if len(label) < 20:
+        return label
+    return label[:17] + "..."
