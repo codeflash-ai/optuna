@@ -239,7 +239,7 @@ def _create_scatter(x: list[Any], y: list[Any], is_feasible: bool) -> Scatter:
     edge_color = "Gray"
     marker_color = "black" if is_feasible else "#cccccc"
     name = "Feasible Trial" if is_feasible else "Infeasible Trial"
-    return go.Scatter(
+    return Scatter(
         x=x,
         y=y,
         marker={
