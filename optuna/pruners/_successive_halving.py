@@ -229,8 +229,9 @@ def _estimate_min_resource(trials: list["optuna.trial.FrozenTrial"]) -> int | No
 
 def _get_current_rung(trial: "optuna.trial.FrozenTrial") -> int:
     # The following loop takes `O(log step)` iterations.
+    attrs = trial.system_attrs
     rung = 0
-    while _completed_rung_key(rung) in trial.system_attrs:
+    while f"completed_rung_{rung}" in attrs:
         rung += 1
     return rung
 
