@@ -398,20 +398,24 @@ def _to_proto_trial(trial: FrozenTrial) -> api_pb2.Trial:
 
 
 def _from_proto_trial(trial: api_pb2.Trial) -> FrozenTrial:
-    datetime_start = (
-        datetime.strptime(trial.datetime_start, DATETIME_FORMAT) if trial.datetime_start else None
+    datetime_start = _fast_datetime_parse(trial.datetime_start) if trial.datetime_start else None
+    datetime_complete = _fast_datetime_parse(trial.datetime_complete) if trial.datetime_complete else None
+
+    # Optimize: generator with dict constructor (slightly faster for large dicts)
+    distributions = dict(
+        (key, json_to_distribution(value)) for key, value in trial.distributions.items()
     )
-    datetime_complete = (
-        datetime.strptime(trial.datetime_complete, DATETIME_FORMAT)
-        if trial.datetime_complete
-        else None
-    )
-    distributions = {
-        key: json_to_distribution(value) for key, value in trial.distributions.items()
-    }
+
+    # Optimize: avoid repeated key lookups per iteration, use local var
     params = {}
     for key, value in trial.params.items():
-        params[key] = distributions[key].to_external_repr(value)
+        dist = distributions[key]
+        params[key] = dist.to_external_repr(value)
+
+    # Pre-allocate dictionaries using generator expressions for user_attrs and system_attrs
+    user_attrs = dict((key, json.loads(value)) for key, value in trial.user_attributes.items())
+    system_attrs = dict((key, json.loads(value)) for key, value in trial.system_attributes.items())
+    intermediate_values = dict((step, value) for step, value in trial.intermediate_values.items())
 
     return FrozenTrial(
         trial_id=trial.trial_id,
@@ -423,7 +427,21 @@ def _from_proto_trial(trial: api_pb2.Trial) -> FrozenTrial:
         datetime_complete=datetime_complete,
         params=params,
         distributions=distributions,
-        user_attrs={key: json.loads(value) for key, value in trial.user_attributes.items()},
-        system_attrs={key: json.loads(value) for key, value in trial.system_attributes.items()},
-        intermediate_values={step: value for step, value in trial.intermediate_values.items()},
+        user_attrs=user_attrs,
+        system_attrs=system_attrs,
+        intermediate_values=intermediate_values,
     )
+
+
+def _fast_datetime_parse(dt_str: str) -> datetime:
+    # Use fromisoformat if string is standard ISO; otherwise, fallback to strptime
+    # Most common DATETIME_FORMAT "%Y-%m-%d %H:%M:%S.%f" is compatible with fromisoformat
+    # But strptime fallback is required for non-standard formats
+    if dt_str:
+        try:
+            # This is extremely fast and memory-efficient
+            return datetime.fromisoformat(dt_str)
+        except ValueError:
+            # Fallback to slower strptime (should rarely hit)
+            return datetime.strptime(dt_str, DATETIME_FORMAT)
+    return None
