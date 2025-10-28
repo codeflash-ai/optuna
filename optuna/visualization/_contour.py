@@ -196,24 +196,46 @@ def _get_contour_subplot(
         )
         return go.Contour(), go.Scatter(), go.Scatter()
 
-    feasible = _PlotValues([], [])
-    infeasible = _PlotValues([], [])
+    # OPTIMIZATION: Use numpy for constraint masking and batch scatter assignment when feasible
+    # Only feasible if all lists are numpy-coercible, else fallback to original loop
+    try:
+        xv = np.array(info.xaxis.values)
+        yv = np.array(info.yaxis.values)
+        mask_valid = (xv != None) & (yv != None)  # filter where both are not None
+        c = np.array(info.constraints, dtype=bool)
+        mask_feasible = mask_valid & c
+        mask_infeasible = mask_valid & (~c)
 
-    for x_value, y_value, c in zip(info.xaxis.values, info.yaxis.values, info.constraints):
-        if x_value is not None and y_value is not None:
-            if c:
-                feasible.x.append(x_value)
-                feasible.y.append(y_value)
-            else:
-                infeasible.x.append(x_value)
-                infeasible.y.append(y_value)
+        feasible_x, feasible_y = xv[mask_feasible], yv[mask_feasible]
+        infeasible_x, infeasible_y = xv[mask_infeasible], yv[mask_infeasible]
+        feasible = _PlotValues(feasible_x.tolist(), feasible_y.tolist())
+        infeasible = _PlotValues(infeasible_x.tolist(), infeasible_y.tolist())
+    except Exception:
+        # fallback (preserve exact original, defensive against e.g. non-numeric or mixed array input)
+        feasible = _PlotValues([], [])
+        infeasible = _PlotValues([], [])
+        for x_value, y_value, c in zip(info.xaxis.values, info.yaxis.values, info.constraints):
+            if x_value is not None and y_value is not None:
+                if c:
+                    feasible.x.append(x_value)
+                    feasible.y.append(y_value)
+                else:
+                    infeasible.x.append(x_value)
+                    infeasible.y.append(y_value)
 
-    z_values = np.full((len(y_indices), len(x_indices)), np.nan)
+    # OPTIMIZATION: Collect z_keys, z_values as arrays before writing to z_values
+    y_len = len(y_indices)
+    x_len = len(x_indices)
+    z_values = np.full((y_len, x_len), np.nan)
 
-    xys = np.array(list(info.z_values.keys()))
-    zs = np.array(list(info.z_values.values()))
-
-    z_values[xys[:, 1], xys[:, 0]] = zs
+    if info.z_values:
+        # Fast path: batch assign using numpy
+        z_keys = info.z_values.keys()
+        # preallocate arrays directly with known dtype for speed
+        xys = np.fromiter(z_keys, dtype="i4,i4", count=len(info.z_values))
+        zs = np.fromiter(info.z_values.values(), dtype=float, count=len(info.z_values))
+        z_values[xys["f1"], xys["f0"]] = zs
+    # (no else branch, identical to original but avoids list allocation if empty)
 
     contour = go.Contour(
         x=x_indices,
@@ -228,6 +250,7 @@ def _get_contour_subplot(
         reversescale=reverse_scale,
     )
 
+    # Reuse existing _create_scatter function as required by code style/compatibility
     return (
         contour,
         _create_scatter(feasible.x, feasible.y, is_feasible=True),
