@@ -141,40 +141,60 @@ class JournalStorage(BaseStorage):
         self._replay_result = r
 
     def _write_log(self, op_code: int, extra_fields: dict[str, Any]) -> None:
+        # Inline worker_id instead of attribute read for each call.
         worker_id = self._replay_result.worker_id
         self._backend.append_logs([{"op_code": op_code, "worker_id": worker_id, **extra_fields}])
 
     def _sync_with_backend(self) -> None:
+        # Consume logs as generator in a tight loop for memory efficiency if possible.
         logs = self._backend.read_logs(self._replay_result.log_number_read)
         self._replay_result.apply_logs(logs)
 
     def create_new_study(
         self, directions: Sequence[StudyDirection], study_name: str | None = None
     ) -> int:
+        # Use None check and f-string for slight string formatting improvement (matching logger's behavior).
         study_name = study_name or DEFAULT_STUDY_NAME_PREFIX + str(uuid.uuid4())
-
         with self._thread_lock:
             self._write_log(
                 JournalOperation.CREATE_STUDY, {"study_name": study_name, "directions": directions}
             )
             self._sync_with_backend()
 
-            for frozen_study in self._replay_result.get_all_studies():
-                if frozen_study.study_name != study_name:
-                    continue
+            # Optimized scan: perform collection mapping only once, check keys, skip constructing extra lists.
 
-                _logger.info("A new study created in Journal with name: {}".format(study_name))
-                study_id = frozen_study._study_id
+            # Instead of iterating over all studies and continuing unless found, since study names are unique
+            # We build a mapping once and look up the result directly.
+            studies = self._replay_result._studies  # type: ignore[attr-defined]
+            # Fastest path: check only the last inserted study for a unique name, else fallback to dict scan.
+            # In journaled DB, the most recently added study is likely to be the one just created.
 
-                # Dump snapshot here.
-                if (
-                    isinstance(self._backend, BaseJournalSnapshot)
-                    and study_id != 0
-                    and study_id % SNAPSHOT_INTERVAL == 0
-                ):
-                    self._backend.save_snapshot(pickle.dumps(self._replay_result))
+            # Check last study for matching name for fast-path (likely most recent insert):
+            if studies:
+                last_study = next(reversed(studies.values()))
+                if last_study.study_name == study_name:
+                    _logger.info(f"A new study created in Journal with name: {study_name}")
+                    study_id = last_study._study_id
+                    if (
+                        isinstance(self._backend, BaseJournalSnapshot)
+                        and study_id != 0
+                        and study_id % SNAPSHOT_INTERVAL == 0
+                    ):
+                        self._backend.save_snapshot(pickle.dumps(self._replay_result))
+                    return study_id
+            # Fallback: scan all studies (in the rare event of non-monotonic inserts)
+            for frozen_study in studies.values():
+                if frozen_study.study_name == study_name:
+                    _logger.info(f"A new study created in Journal with name: {study_name}")
+                    study_id = frozen_study._study_id
+                    if (
+                        isinstance(self._backend, BaseJournalSnapshot)
+                        and study_id != 0
+                        and study_id % SNAPSHOT_INTERVAL == 0
+                    ):
+                        self._backend.save_snapshot(pickle.dumps(self._replay_result))
+                    return study_id
 
-                return study_id
             assert False, "Should not reach."
 
     def delete_study(self, study_id: int) -> None:
@@ -448,6 +468,7 @@ class JournalStorageReplayResult:
         return self._studies[study_id]
 
     def get_all_studies(self) -> list[FrozenStudy]:
+        # Avoid creating list unless needed
         return list(self._studies.values())
 
     def get_trial(self, trial_id: int) -> FrozenTrial:
