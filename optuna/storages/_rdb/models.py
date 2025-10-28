@@ -4,7 +4,7 @@ import enum
 import math
 from typing import Any
 
-from sqlalchemy import asc
+from sqlalchemy import select, asc
 from sqlalchemy import case
 from sqlalchemy import CheckConstraint
 from sqlalchemy import DateTime
@@ -277,13 +277,17 @@ class TrialModel(BaseModel):
     def count(
         cls, session: orm.Session, study: StudyModel | None = None, state: TrialState | None = None
     ) -> int:
-        trial_count = session.query(func.count(cls.trial_id))
+        conditions = []
         if study is not None:
-            trial_count = trial_count.filter(cls.study_id == study.study_id)
+            conditions.append(cls.study_id == study.study_id)
         if state is not None:
-            trial_count = trial_count.filter(cls.state == state)
+            conditions.append(cls.state == state)
 
-        return trial_count.scalar()
+        stmt = select(func.count(cls.trial_id))
+        if conditions:
+            stmt = stmt.where(*conditions)
+
+        return session.execute(stmt).scalar_one()
 
     def count_past_trials(self, session: orm.Session) -> int:
         trial_count = session.query(func.count(TrialModel.trial_id)).filter(
