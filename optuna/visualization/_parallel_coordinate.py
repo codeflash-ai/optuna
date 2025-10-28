@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-from collections import defaultdict
 from collections.abc import Callable
 import math
 from typing import Any
@@ -129,12 +127,17 @@ def _get_parallel_coordinate_info(
         study.get_trials(deepcopy=False, states=(TrialState.COMPLETE,)), target=target
     )
 
-    all_params = {p_name for t in trials for p_name in t.params.keys()}
+    all_params = {p_name for t in trials for p_name in t.params}
     if params is not None:
-        for input_p_name in params:
-            if input_p_name not in all_params:
-                raise ValueError("Parameter {} does not exist in your study.".format(input_p_name))
-        all_params = set(params)
+        params_set = set(params)
+        missing_params = [
+            input_p_name for input_p_name in params if input_p_name not in all_params
+        ]
+        if missing_params:
+            raise ValueError(
+                "Parameter {} does not exist in your study.".format(missing_params[0])
+            )
+        all_params = params_set
     sorted_params = sorted(all_params)
 
     if target is None:
@@ -146,9 +149,9 @@ def _get_parallel_coordinate_info(
 
     skipped_trial_numbers = _get_skipped_trial_numbers(trials, sorted_params)
 
-    objectives = tuple([target(t) for t in trials if t.number not in skipped_trial_numbers])
-    # The value of (0, 0) is a dummy range. It is ignored when we plot.
-    objective_range = (min(objectives), max(objectives)) if len(objectives) > 0 else (0, 0)
+    # Use generator expression directly for objectives
+    objectives = tuple(target(t) for t in trials if t.number not in skipped_trial_numbers)
+    objective_range = (min(objectives), max(objectives)) if objectives else (0, 0)
     dim_objective = _DimensionInfo(
         label=target_name,
         values=objectives,
@@ -159,7 +162,7 @@ def _get_parallel_coordinate_info(
         ticktext=[],
     )
 
-    if len(trials) == 0:
+    if not trials:
         _logger.warning("Your study does not have any completed trials.")
         return _ParallelCoordinateInfo(
             dim_objective=dim_objective,
@@ -168,7 +171,7 @@ def _get_parallel_coordinate_info(
             target_name=target_name,
         )
 
-    if len(objectives) == 0:
+    if not objectives:
         _logger.warning("Your study has only completed trials with missing parameters.")
         return _ParallelCoordinateInfo(
             dim_objective=dim_objective,
@@ -179,29 +182,34 @@ def _get_parallel_coordinate_info(
 
     numeric_cat_params_indices: list[int] = []
     dims = []
+    # Precompute set of skipped trial numbers for fast contains check
+    skipped_set = skipped_trial_numbers
     for dim_index, p_name in enumerate(sorted_params, start=1):
-        values = []
+        # Preallocate needed lists and variables
         is_categorical = False
-        for t in trials:
-            if t.number in skipped_trial_numbers:
-                continue
-            if p_name in t.params:
-                values.append(t.params[p_name])
-                is_categorical |= isinstance(t.distributions[p_name], CategoricalDistribution)
+        # Collect values for present trials only, skipping skipped trials in a single list comprehension
+        values_and_types = [
+            (t.params[p_name], isinstance(t.distributions[p_name], CategoricalDistribution))
+            for t in trials
+            if t.number not in skipped_set and p_name in t.params
+        ]
+        if values_and_types:
+            values, types = zip(*values_and_types)
+            is_categorical = any(types)
+        else:
+            values = ()
         if _is_log_scale(trials, p_name):
-            values = [math.log10(v) for v in values]
-            min_value = min(values)
-            max_value = max(values)
-            tickvals: list[int | float] = list(
-                range(math.ceil(min_value), math.floor(max_value) + 1)
-            )
+            log_values = [math.log10(v) for v in values]
+            min_value = min(log_values)
+            max_value = max(log_values)
+            tickvals = list(range(math.ceil(min_value), math.floor(max_value) + 1))
             if min_value not in tickvals:
                 tickvals = [min_value] + tickvals
             if max_value not in tickvals:
                 tickvals = tickvals + [max_value]
             dim = _DimensionInfo(
                 label=_truncate_label(p_name),
-                values=tuple(values),
+                values=tuple(log_values),
                 range=(min_value, max_value),
                 is_log=True,
                 is_cat=False,
@@ -209,31 +217,38 @@ def _get_parallel_coordinate_info(
                 ticktext=["{:.3g}".format(math.pow(10, x)) for x in tickvals],
             )
         elif is_categorical:
-            vocab: defaultdict[int | str, int] = defaultdict(lambda: len(vocab))
-
-            ticktext: list[str]
+            vocab: dict[int | str, int] = {}
+            # Faster one-pass build for numeric categoricals
             if _is_numerical(trials, p_name):
-                _ = [vocab[v] for v in sorted(values)]
-                values = [vocab[v] for v in values]
-                ticktext = [str(v) for v in list(sorted(vocab.keys()))]
+                sorted_unique = sorted(set(values))  # set: faster for unique values
+                for idx, v in enumerate(sorted_unique):
+                    vocab[v] = idx
+                mapped_values = [vocab[v] for v in values]
+                ticktext = [str(v) for v in sorted_unique]
                 numeric_cat_params_indices.append(dim_index)
             else:
-                values = [vocab[v] for v in values]
-                ticktext = [str(v) for v in list(sorted(vocab.keys(), key=lambda x: vocab[x]))]
+                # Map based on encounter order, keep ticktext in map order
+                for v in values:
+                    if v not in vocab:
+                        vocab[v] = len(vocab)
+                mapped_values = [vocab[v] for v in values]
+                ticktext = [str(v) for v in sorted(vocab.keys(), key=lambda x: vocab[x])]
             dim = _DimensionInfo(
                 label=_truncate_label(p_name),
-                values=tuple(values),
-                range=(min(values), max(values)),
+                values=tuple(mapped_values),
+                range=(min(mapped_values), max(mapped_values)) if mapped_values else (0, 0),
                 is_log=False,
                 is_cat=True,
                 tickvals=list(range(len(vocab))),
                 ticktext=ticktext,
             )
         else:
+            float_values = tuple(values)
+            mm = (min(float_values), max(float_values)) if float_values else (0, 0)
             dim = _DimensionInfo(
                 label=_truncate_label(p_name),
-                values=tuple(values),
-                range=(min(values), max(values)),
+                values=float_values,
+                range=mm,
                 is_log=False,
                 is_cat=False,
                 tickvals=[],
@@ -247,21 +262,19 @@ def _get_parallel_coordinate_info(
         # np.lexsort consumes the sort keys the order from back to front.
         # So the values of parameters have to be reversed the order.
         idx = np.lexsort([dims[index].values for index in numeric_cat_params_indices][::-1])
-        updated_dims = []
-        for dim in dims:
-            # Since the values are mapped to other categories by the index,
-            # the index will be swapped according to the sorted index of numeric params.
-            updated_dims.append(
-                _DimensionInfo(
-                    label=dim.label,
-                    values=tuple(np.array(dim.values)[idx]),
-                    range=dim.range,
-                    is_log=dim.is_log,
-                    is_cat=dim.is_cat,
-                    tickvals=dim.tickvals,
-                    ticktext=dim.ticktext,
-                )
+        # Use np.take instead of manual array conversion
+        updated_dims = [
+            _DimensionInfo(
+                label=dim.label,
+                values=tuple(np.take(dim.values, idx)),
+                range=dim.range,
+                is_log=dim.is_log,
+                is_cat=dim.is_cat,
+                tickvals=dim.tickvals,
+                ticktext=dim.ticktext,
             )
+            for dim in dims
+        ]
         dim_objective = updated_dims[0]
         dims = updated_dims[1:]
 
