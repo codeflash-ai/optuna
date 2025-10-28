@@ -4,7 +4,7 @@ import enum
 import math
 from typing import Any
 
-from sqlalchemy import asc
+from sqlalchemy import select, asc
 from sqlalchemy import case
 from sqlalchemy import CheckConstraint
 from sqlalchemy import DateTime
@@ -308,12 +308,10 @@ class TrialUserAttributeModel(BaseModel):
     def find_by_trial_and_key(
         cls, trial: TrialModel, key: str, session: orm.Session
     ) -> "TrialUserAttributeModel" | None:
-        attribute = (
-            session.query(cls)
-            .filter(cls.trial_id == trial.trial_id)
-            .filter(cls.key == key)
-            .one_or_none()
-        )
+        attribute = session.scalars(
+            select(cls)
+            .where(cls.trial_id == trial.trial_id, cls.key == key)
+        ).one_or_none()
 
         return attribute
 
