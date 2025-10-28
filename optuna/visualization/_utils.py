@@ -17,6 +17,7 @@ from optuna.study import Study
 from optuna.study._study_direction import StudyDirection
 from optuna.trial import FrozenTrial
 from optuna.visualization import _plotly_imports
+import math
 
 
 __all__ = ["is_available"]
@@ -161,7 +162,7 @@ def _filter_nonfinite(
             raise
 
         # Not a Number, positive infinity and negative infinity are considered to be non-finite.
-        if not np.isfinite(value):
+        if not math.isfinite(value):
             if with_message:
                 _logger.warning(
                     f"Trial {trial.number} is omitted in visualization "
