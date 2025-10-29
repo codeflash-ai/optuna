@@ -104,25 +104,32 @@ def _get_rank_plot(
 def _add_rank_subplot(
     ax: "Axes", info: _RankSubplotInfo, set_x_label: bool = True, set_y_label: bool = True
 ) -> "PathCollection":
+    x_is_cat = info.xaxis.is_cat
+    y_is_cat = info.yaxis.is_cat
+    x_is_log = info.xaxis.is_log
+    y_is_log = info.yaxis.is_log
+
     if set_x_label:
         ax.set_xlabel(info.xaxis.name)
     if set_y_label:
         ax.set_ylabel(info.yaxis.name)
 
-    if not info.xaxis.is_cat:
+    if not x_is_cat:
         ax.set_xlim(info.xaxis.range[0], info.xaxis.range[1])
-    if not info.yaxis.is_cat:
+    if not y_is_cat:
         ax.set_ylim(info.yaxis.range[0], info.yaxis.range[1])
 
-    if info.xaxis.is_log:
+    if x_is_log:
         ax.set_xscale("log")
 
-    if info.yaxis.is_log:
+    if y_is_log:
         ax.set_yscale("log")
 
+    colors_div = info.colors / 255
+
     return ax.scatter(
-        x=[str(x) for x in info.xs] if info.xaxis.is_cat else info.xs,
-        y=[str(y) for y in info.ys] if info.yaxis.is_cat else info.ys,
-        c=info.colors / 255,
+        x=list(map(str, info.xs)) if x_is_cat else info.xs,
+        y=list(map(str, info.ys)) if y_is_cat else info.ys,
+        c=colors_div,
         edgecolors="grey",
     )
