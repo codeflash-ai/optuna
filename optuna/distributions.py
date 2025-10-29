@@ -421,7 +421,7 @@ class IntUniformDistribution(IntDistribution):
         super().__init__(low=low, high=high, log=False, step=step)
 
     def _asdict(self) -> dict:
-        d = copy.deepcopy(self.__dict__)
+        d = self.__dict__.copy()
         d.pop("log")
         return d
 
