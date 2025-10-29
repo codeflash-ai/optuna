@@ -145,9 +145,21 @@ def _is_pareto_front_nd(unique_lexsorted_loss_values: np.ndarray) -> np.ndarray:
 
 def _is_pareto_front_2d(unique_lexsorted_loss_values: np.ndarray) -> np.ndarray:
     n_trials = unique_lexsorted_loss_values.shape[0]
-    cummin_value1 = np.minimum.accumulate(unique_lexsorted_loss_values[:, 1])
-    on_front = np.ones(n_trials, dtype=bool)
-    on_front[1:] = cummin_value1[1:] < cummin_value1[:-1]  # True if cummin value1 is new minimum.
+    # Directly allocate the output and compute cummin/value comparison without extra memory allocations
+    if n_trials == 0:
+        return np.empty(0, dtype=bool)
+
+    value1 = unique_lexsorted_loss_values[:, 1]
+    # Preallocate cummin array instead of creating a temporary array via np.minimum.accumulate
+    cummin_value1 = np.empty(n_trials, dtype=value1.dtype)
+    cummin_value1[0] = value1[0]
+    np.minimum.accumulate(value1, out=cummin_value1)
+    # Using np.empty here, as we will set all entries explicitly
+    on_front = np.empty(n_trials, dtype=bool)
+    on_front[0] = True
+    # Avoid np.ones and direct assignment for better memory efficiency
+    # Use slicing assignment with comparison in one step for the remainder
+    np.less(cummin_value1[1:], cummin_value1[:-1], out=on_front[1:])
     return on_front
 
 
