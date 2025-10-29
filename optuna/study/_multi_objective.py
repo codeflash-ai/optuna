@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import cast
 
 import numpy as np
 
@@ -128,17 +127,16 @@ def _is_pareto_front_nd(unique_lexsorted_loss_values: np.ndarray) -> np.ndarray:
     n_trials = loss_values.shape[0]
     on_front = np.zeros(n_trials, dtype=bool)
     remaining_indices: np.ndarray[tuple[int], np.dtype[np.signedinteger]] = np.arange(n_trials)
-    while len(remaining_indices):
-        # NOTE: trials[j] cannot dominate trials[i] for i < j because of lexsort.
-        # Therefore, remaining_indices[0] is always non-dominated.
-        on_front[(new_nondominated_index := remaining_indices[0])] = True
-        nondominated_and_not_top = np.any(
-            loss_values[remaining_indices] < loss_values[new_nondominated_index], axis=1
-        )
-        remaining_indices = cast(
-            np.ndarray[tuple[int], np.dtype[np.signedinteger]],
-            remaining_indices[nondominated_and_not_top],
-        )
+    # Vectorized implementation for efficiency
+    curr = 0
+    while curr < len(remaining_indices):
+        idx = remaining_indices[curr]
+        on_front[idx] = True
+        # Only keep indices that are strictly better in some objective than the current reference
+        mask = np.any(loss_values[remaining_indices] < loss_values[idx], axis=1)
+        # Since the indices before curr are dominated, move to the next undiscarded
+        remaining_indices = remaining_indices[mask]
+        curr = 0  # Always restart because we use first lexsort-available
 
     return on_front
 
