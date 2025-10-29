@@ -200,11 +200,10 @@ def _calculate_nondomination_rank(
     rank = 0
     indices = np.arange(n_unique)
     while n_unique - indices.size < n_below:
-        on_front = _is_pareto_front(unique_lexsorted_loss_values, assume_unique_lexsorted=True)
+        on_front = _is_pareto_front(unique_lexsorted_loss_values[indices], assume_unique_lexsorted=True)
         ranks[indices[on_front]] = rank
         # Remove the recent Pareto solutions.
         indices = indices[~on_front]
-        unique_lexsorted_loss_values = unique_lexsorted_loss_values[~on_front]
         rank += 1
 
     ranks[indices] = rank  # Rank worse than the top n_below is defined as the worst rank.
