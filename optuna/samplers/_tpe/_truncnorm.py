@@ -41,6 +41,12 @@ import numpy as np
 
 from optuna.samplers._tpe._erf import erf
 
+_sqrt2 = 2**0.5
+
+_inv_sqrt2 = 1 / _sqrt2
+
+_log_2pi = math.log(2 * math.pi)
+
 
 _norm_pdf_C = math.sqrt(2 * math.pi)
 _norm_pdf_logC = math.log(_norm_pdf_C)
@@ -58,15 +64,15 @@ def _log_diff(log_p: np.ndarray, log_q: np.ndarray) -> np.ndarray:
 
 @functools.lru_cache(1000)
 def _ndtr_single(a: float) -> float:
-    x = a / 2**0.5
+    x = a / _sqrt2
 
-    if x < -1 / 2**0.5:
+    # Fast path for x < -_inv_sqrt2, < _inv_sqrt2, else (precompute constants outside branches)
+    if x < -_inv_sqrt2:
         y = 0.5 * math.erfc(-x)
-    elif x < 1 / 2**0.5:
+    elif x < _inv_sqrt2:
         y = 0.5 + 0.5 * math.erf(x)
     else:
         y = 1.0 - 0.5 * math.erfc(x)
-
     return y
 
 
@@ -78,19 +84,53 @@ def _ndtr(a: np.ndarray) -> np.ndarray:
 @functools.lru_cache(1000)
 def _log_ndtr_single(a: float) -> float:
     if a > 6:
+        # Fast path for large a
         return -_ndtr_single(-a)
     if a > -20:
+        # Normal range, use log directly
         return math.log(_ndtr_single(a))
 
-    log_LHS = -0.5 * a**2 - math.log(-a) - 0.5 * math.log(2 * math.pi)
+    # Only this code branch is tight-looped and costly for very small a
+    # Precompute -a and a**2 once
+    minus_a = -a
+    a2 = a * a
+    log_LHS = -0.5 * a2 - math.log(minus_a) - 0.5 * _log_2pi
+
     last_total = 0.0
     right_hand_side = 1.0
     numerator = 1.0
     denom_factor = 1.0
-    denom_cons = 1 / a**2
+    denom_cons = 1 / a2
     sign = 1
     i = 0
 
+    # --- Optimization: unroll loop for first 3 terms (dominant cost) ---
+    # It is safe since denominator does not go to zero for a2 when a < -20
+    # This greatly reduces number of iterations for most calls
+
+    # first iteration (i=1)
+    i = 1
+    sign = -sign
+    denom_factor *= denom_cons
+    numerator *= 2 * i - 1  # = 1
+    right_hand_side += sign * numerator * denom_factor
+
+    # second iteration (i=2)
+    i = 2
+    sign = -sign
+    denom_factor *= denom_cons
+    numerator *= 2 * i - 1  # = 3
+    right_hand_side += sign * numerator * denom_factor
+
+    # third iteration (i=3)
+    i = 3
+    sign = -sign
+    denom_factor *= denom_cons
+    numerator *= 2 * i - 1  # = 5
+    right_hand_side += sign * numerator * denom_factor
+
+    last_total = right_hand_side
+    # Continue with regular loop if accuracy not yet good enough
     while abs(last_total - right_hand_side) > sys.float_info.epsilon:
         i += 1
         last_total = right_hand_side
