@@ -11,6 +11,8 @@ from optuna.study._study_direction import StudyDirection
 from optuna.trial import FrozenTrial
 from optuna.trial import TrialState
 
+_INF = float("inf")
+
 
 def _get_pareto_front_trials_by_trials(
     trials: Sequence[FrozenTrial],
@@ -248,7 +250,7 @@ def _dominates(
 
 def _normalize_value(value: float | None, direction: StudyDirection) -> float:
     if value is None:
-        return float("inf")
+        return _INF
 
     if direction is StudyDirection.MAXIMIZE:
         value = -value
