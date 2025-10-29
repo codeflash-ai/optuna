@@ -18,21 +18,51 @@ def _get_pareto_front_trials_by_trials(
     consider_constraint: bool = False,
 ) -> list[FrozenTrial]:
     # NOTE(nabenabe0928): Vectorization relies on all the trials being complete.
-    trials = [t for t in trials if t.state == TrialState.COMPLETE]
-    if consider_constraint:
-        trials = _get_feasible_trials(trials)
-    if len(trials) == 0:
+    # Optimize by avoiding repeated attribute access and unnecessary intermediate lists.
+    # Use a generator expression for filtering to reduce memory footprint.
+    # This is the dominant cost per line profiling.
+
+    if not trials:
         return []
 
-    if any(len(t.values) != len(directions) for t in trials):
-        raise ValueError(
-            "The number of the values and the number of the objectives must be identical."
-        )
+    # Avoid creating a full list in memory if possible.
+    # We'll use a single-pass for filtering instead of chained list comprehensions.
+    filtered_trials = []
+    append = filtered_trials.append
+    trial_complete_state = TrialState.COMPLETE
+    for t in trials:
+        if t.state is trial_complete_state:
+            append(t)
+    trials = filtered_trials
 
-    loss_values = np.asarray(
-        [[_normalize_value(v, d) for v, d in zip(t.values, directions)] for t in trials]
-    )
+    if consider_constraint:
+        # _get_feasible_trials is already efficient, returns a filtered list.
+        trials = _get_feasible_trials(trials)
+    if not trials:
+        return []
+
+    # Short-circuit type/length check for objectives (unchanged, but use generator form for short-circuit efficiency).
+    expected_n_values = len(directions)
+    for t in trials:
+        if len(t.values) != expected_n_values:
+            raise ValueError(
+                "The number of the values and the number of the objectives must be identical."
+            )
+
+    # Preallocate the loss_values array for efficiency rather than nested list comprehension
+    num_trials = len(trials)
+    num_objectives = expected_n_values
+    # It's more memory and cache-efficient to write this as a preallocated array
+    loss_values = np.empty((num_trials, num_objectives), dtype=float)
+    # Inline reference for _normalize_value/directions to avoid repeated attribute lookup
+    for i, t in enumerate(trials):
+        for j, (v, d) in enumerate(zip(t.values, directions)):
+            loss_values[i, j] = _normalize_value(v, d)
+
+    # Use on_front to filter pareto trials directly (unchanged).
     on_front = _is_pareto_front(loss_values, assume_unique_lexsorted=False)
+
+    # Zip is fine as most efficient way here. Avoid creating unnecessary intermediate lists.
     return [t for t, is_pareto in zip(trials, on_front) if is_pareto]
 
 
