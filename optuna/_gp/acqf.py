@@ -71,19 +71,32 @@ def standard_logei(z: torch.Tensor) -> torch.Tensor:
 
     NOTE: We do not use the third condition because [-10**100, 10**100] is an overly high range.
     """
-    # First condition (most z falls into this condition, so we calculate it first)
+    # Compute commonly used values once to avoid redundant computation
+    z_half = 0.5 * z
+    minus_z_half_z = -z_half * z
+    sqrt_half_z = -_SQRT_HALF * z
+
+    # First condition, vectorized calculation
     # NOTE: ei(z) = z * cdf(z) + pdf(z)
-    out = (
-        (z_half := 0.5 * z) * torch.special.erfc(-_SQRT_HALF * z)  # z * cdf(z)
-        + (-z_half * z).exp() * _INV_SQRT_2PI  # pdf(z)
-    ).log()
-    if (z_small := z[(small := z < -25)]).numel():
-        # Second condition (does not happen often, so we calculate it only if necessary)
-        out[small] = (
+    erfc_val = torch.special.erfc(sqrt_half_z)
+    exp_val = minus_z_half_z.exp()
+    main_term = z_half * erfc_val + exp_val * _INV_SQRT_2PI
+    out = main_term.log()
+
+    # Second condition (rare: z < -25)
+    small = z < -25
+
+    # Only proceed if there are elements requiring this special-case correction
+    if small.any():
+        z_small = z[small]
+        erfcx_val = torch.special.erfcx(-_SQRT_HALF * z_small)
+        special_term = (
             -0.5 * z_small**2
             - _LOG_SQRT_2PI
-            + (1 + _SQRT_HALF_PI * z_small * torch.special.erfcx(-_SQRT_HALF * z_small)).log()
+            + (1 + _SQRT_HALF_PI * z_small * erfcx_val).log()
         )
+        out[small] = special_term
+
     return out
 
 
