@@ -66,6 +66,9 @@ def _get_library_root_logger() -> logging.Logger:
 def _configure_library_root_logger() -> None:
     global _default_handler
 
+    if _default_handler:
+        return
+
     with _lock:
         if _default_handler:
             # This library has already configured the library root logger.
