@@ -678,9 +678,10 @@ def _adjust_discrete_uniform_high(low: float, high: float, step: float) -> float
 
 def _adjust_int_uniform_high(low: int, high: int, step: int) -> int:
     r = high - low
-    if r % step != 0:
+    modulo = r % step
+    if modulo:
         old_high = high
-        high = r // step * step + low
+        high = high - modulo
         warnings.warn(
             f"The distribution is specified by [{low}, {old_high}] and {step=}, but the range is "
             f"not divisible by `step`. It will be replaced with [{low}, {high}]."
