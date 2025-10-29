@@ -41,6 +41,8 @@ import numpy as np
 
 from optuna.samplers._tpe._erf import erf
 
+_half = 0.5
+
 
 _norm_pdf_C = math.sqrt(2 * math.pi)
 _norm_pdf_logC = math.log(_norm_pdf_C)
@@ -107,7 +109,8 @@ def _log_ndtr(a: np.ndarray) -> np.ndarray:
 
 
 def _norm_logpdf(x: np.ndarray) -> np.ndarray:
-    return -(x**2) / 2.0 - _norm_pdf_logC
+    # Avoid unnecessary Python float conversions: use scalar multiplication first, avoid `**2` overhead with np.square
+    return -_half * np.square(x) - _norm_pdf_logC
 
 
 def _log_gauss_mass(a: np.ndarray, b: np.ndarray) -> np.ndarray:
