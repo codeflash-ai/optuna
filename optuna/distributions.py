@@ -638,24 +638,30 @@ def check_distribution_compatibility(
 
     """
 
-    if dist_old.__class__ != dist_new.__class__:
+    cls_old = dist_old.__class__
+    cls_new = dist_new.__class__
+    if cls_old is not cls_new:
         raise ValueError("Cannot set different distribution kind to the same parameter name.")
 
-    if isinstance(dist_old, (FloatDistribution, IntDistribution)):
+    # Fast path: avoid isinstance, only check direct types
+    if cls_old is FloatDistribution or cls_old is IntDistribution:
         # For mypy.
-        assert isinstance(dist_new, (FloatDistribution, IntDistribution))
+        assert cls_new is FloatDistribution or cls_new is IntDistribution
 
+        # Short-circuit before expensive comparison
         if dist_old.log != dist_new.log:
             raise ValueError("Cannot set different log configuration to the same parameter name.")
+        return
 
-    if not isinstance(dist_old, CategoricalDistribution):
-        return
-    if not isinstance(dist_new, CategoricalDistribution):
-        return
-    if dist_old != dist_new:
-        raise ValueError(
-            CategoricalDistribution.__name__ + " does not support dynamic value space."
-        )
+    # CategoricalDistribution compatibility check
+    if cls_old is CategoricalDistribution:
+        # For mypy
+        assert cls_new is CategoricalDistribution
+        # Direct comparison: may be expensive, but cannot avoid
+        if dist_old != dist_new:
+            raise ValueError(
+                CategoricalDistribution.__name__ + " does not support dynamic value space."
+            )
 
 
 def _adjust_discrete_uniform_high(low: float, high: float, step: float) -> float:
