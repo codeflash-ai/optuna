@@ -449,7 +449,8 @@ class IntLogUniformDistribution(IntDistribution):
         super().__init__(low=low, high=high, log=True, step=step)
 
     def _asdict(self) -> dict:
-        d = copy.deepcopy(self.__dict__)
+        # Make a shallow copy, then remove 'log' which is always True
+        d = self.__dict__.copy()
         d.pop("log")
         return d
 
