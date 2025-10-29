@@ -132,7 +132,8 @@ def _erf_right_non_big(x: np.ndarray) -> np.ndarray:
 
 def erf(x: np.ndarray) -> np.ndarray:
     if x.size < 2000:
-        return np.asarray([math.erf(v) for v in x.ravel()]).reshape(x.shape)
+        vec_erf = np.frompyfunc(math.erf, 1, 1)
+        return vec_erf(x).astype(np.float64)
 
     a = np.abs(x).ravel()
     is_not_nan = ~np.isnan(a)
