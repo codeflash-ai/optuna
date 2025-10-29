@@ -242,15 +242,25 @@ class LogEHVI(BaseAcquisitionFunc):
 
         self._stabilizing_noise = stabilizing_noise
         self._gpr_list = gpr_list
+
+        # Move _fixed_samples to match CPU/GPU of input data for .eval_acqf (performance)
+        device = Y_train.device if hasattr(Y_train, "device") else torch.device("cpu")
+        dtype = Y_train.dtype if hasattr(Y_train, "dtype") else torch.float32
         self._fixed_samples = _sample_from_normal_sobol(
             dim=Y_train.shape[-1], n_samples=n_qmc_samples, seed=qmc_seed
-        )
+        ).to(device=device, dtype=dtype, copy=False)
+
         self._non_dominated_box_lower_bounds, non_dominated_box_upper_bounds = (
             _get_non_dominated_box_bounds()
         )
+        # Ensure tensors have proper device/dtype for computational efficiency.
+        self._non_dominated_box_lower_bounds = self._non_dominated_box_lower_bounds.to(device=device, dtype=dtype, copy=False)
+        non_dominated_box_upper_bounds = non_dominated_box_upper_bounds.to(device=device, dtype=dtype, copy=False)
+
         self._non_dominated_box_intervals = (
             non_dominated_box_upper_bounds - self._non_dominated_box_lower_bounds
         ).clamp_min_(_EPS)
+
         # Since all the objectives are equally important, we simply use the mean of
         # inverse of squared mean lengthscales over all the objectives.
         # inverse_squared_lengthscales is used in optim_mixed.py.
@@ -258,21 +268,22 @@ class LogEHVI(BaseAcquisitionFunc):
         super().__init__(np.mean([gpr.length_scales for gpr in gpr_list], axis=0), search_space)
 
     def eval_acqf(self, x: torch.Tensor) -> torch.Tensor:
-        Y_post = []
-        for i, gpr in enumerate(self._gpr_list):
+        # Batch compute mean/var for all GPs for efficiency
+        means = []
+        stdevs = []
+        for gpr in self._gpr_list:
             mean, var = gpr.posterior(x)
-            stdev = torch.sqrt(var + self._stabilizing_noise)
-            # NOTE(nabenabe): By using fixed samples from the Sobol sequence, EHVI becomes
-            # deterministic, making it possible to optimize the acqf by l-BFGS.
-            # Sobol is better than the standard Monte-Carlo w.r.t. the approximation stability.
-            # cf. Appendix D of https://arxiv.org/pdf/2006.05078
-            Y_post.append(mean[..., None] + stdev[..., None] * self._fixed_samples[..., i])
+            means.append(mean)
+            stdevs.append(torch.sqrt(var + self._stabilizing_noise))
+        means = torch.stack(means, dim=-1)  # shape (..., n_objectives)
+        stdevs = torch.stack(stdevs, dim=-1)  # shape (..., n_objectives)
 
-        # NOTE(nabenabe): Use the following once multi-task GP is supported.
-        # L = torch.linalg.cholesky(cov)
-        # Y_post = means[..., None, :] + torch.einsum("...MM,SM->...SM", L, fixed_samples)
+        # Exploit broadcasting instead of python loops (major speedup)
+        # Y_post: (..., n_qmc_samples, n_objectives)
+        Y_post = means.unsqueeze(-2) + stdevs.unsqueeze(-2) * self._fixed_samples
+
         return logehvi(
-            Y_post=torch.stack(Y_post, dim=-1),
+            Y_post=Y_post,
             non_dominated_box_lower_bounds=self._non_dominated_box_lower_bounds,
             non_dominated_box_intervals=self._non_dominated_box_intervals,
         )
@@ -293,11 +304,13 @@ class ConstrainedLogEHVI(BaseAcquisitionFunc):
         assert (
             len(constraints_gpr_list) == len(constraints_threshold_list) and constraints_gpr_list
         )
+        # Only instantiate LogEHVI if Y_feasible is not None
         self._acqf = (
             LogEHVI(gpr_list, search_space, Y_feasible, n_qmc_samples, qmc_seed, stabilizing_noise)
             if Y_feasible is not None
             else None
         )
+        # Eagerly prebuild constraints acqfs for efficiency in eval_acqf
         self._constraints_acqf_list = [
             LogPI(_gpr, search_space, _threshold, stabilizing_noise)
             for _gpr, _threshold in zip(constraints_gpr_list, constraints_threshold_list)
@@ -309,6 +322,7 @@ class ConstrainedLogEHVI(BaseAcquisitionFunc):
         super().__init__(np.mean([gpr.length_scales for gpr in gpr_list], axis=0), search_space)
 
     def eval_acqf(self, x: torch.Tensor) -> torch.Tensor:
+        # Add constraint acqf values in a loop; cannot vectorize as each acqf may be different.
         constraints_acqf_values = sum(acqf.eval_acqf(x) for acqf in self._constraints_acqf_list)
         if self._acqf is None:
             return cast(torch.Tensor, constraints_acqf_values)
