@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import cast
 
 import numpy as np
 
@@ -127,18 +126,21 @@ def _is_pareto_front_nd(unique_lexsorted_loss_values: np.ndarray) -> np.ndarray:
     loss_values = unique_lexsorted_loss_values[:, 1:]
     n_trials = loss_values.shape[0]
     on_front = np.zeros(n_trials, dtype=bool)
-    remaining_indices: np.ndarray[tuple[int], np.dtype[np.signedinteger]] = np.arange(n_trials)
-    while len(remaining_indices):
-        # NOTE: trials[j] cannot dominate trials[i] for i < j because of lexsort.
-        # Therefore, remaining_indices[0] is always non-dominated.
-        on_front[(new_nondominated_index := remaining_indices[0])] = True
-        nondominated_and_not_top = np.any(
-            loss_values[remaining_indices] < loss_values[new_nondominated_index], axis=1
-        )
-        remaining_indices = cast(
-            np.ndarray[tuple[int], np.dtype[np.signedinteger]],
-            remaining_indices[nondominated_and_not_top],
-        )
+    if n_trials == 0:
+        return on_front
+
+    dominated = np.zeros(n_trials, dtype=bool)
+
+    for i in range(n_trials):
+        if dominated[i]:
+            continue
+        loss_i = loss_values[i]
+        on_front[i] = True
+        if i+1 < n_trials:
+            cmp = loss_values[i+1:] < loss_i
+            not_dominated_mask = np.any(cmp, axis=1)
+            dominated_indices = np.arange(i+1, n_trials)
+            dominated[dominated_indices] |= ~not_dominated_mask
 
     return on_front
 
