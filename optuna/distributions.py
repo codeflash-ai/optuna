@@ -188,7 +188,7 @@ class FloatDistribution(BaseDistribution):
                 "float-castable value is expected."
             ) from e
 
-        if math.isnan(internal_repr):
+        if internal_repr != internal_repr:
             raise ValueError(f"`{param_value_in_external_repr}` is invalid value.")
         if self.log and internal_repr <= 0.0:
             raise ValueError(
