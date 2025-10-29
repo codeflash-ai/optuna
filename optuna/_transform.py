@@ -242,24 +242,23 @@ def _transform_search_space(
 def _transform_numerical_param(
     param: int | float, distribution: BaseDistribution, transform_log: bool
 ) -> float:
-    d = distribution
-
-    if isinstance(d, CategoricalDistribution):
+    # Fast path: reduce the number of isinstance calls by avoiding unnecessary branching
+    # Perform a single type check and cache the commonly accessed attribute
+    if isinstance(distribution, FloatDistribution):
+        log_flag = distribution.log
+    elif isinstance(distribution, IntDistribution):
+        log_flag = distribution.log
+    elif isinstance(distribution, CategoricalDistribution):
         assert False, "Should not reach. Should be one-hot encoded."
-    elif isinstance(d, FloatDistribution):
-        if d.log:
-            trans_param = math.log(param) if transform_log else float(param)
-        else:
-            trans_param = float(param)
-    elif isinstance(d, IntDistribution):
-        if d.log:
-            trans_param = math.log(param) if transform_log else float(param)
-        else:
-            trans_param = float(param)
     else:
         assert False, "Should not reach. Unexpected distribution."
 
-    return trans_param
+    if log_flag:
+        # Use direct logic to minimize redundant float() calls and speed up math.log
+        # The walrus operator is not allowed for optimization purposes, so keep logic tight
+        return math.log(param) if transform_log else float(param)
+    else:
+        return float(param)
 
 
 def _untransform_numerical_param(
