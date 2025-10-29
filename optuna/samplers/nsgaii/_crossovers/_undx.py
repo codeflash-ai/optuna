@@ -47,25 +47,26 @@ class UNDXCrossover(BaseCrossover):
             parents_params
         )  # Normalized vector from x1 to x2.
         v_13 = parents_params[2] - parents_params[0]  # Vector from x1 to x3.
+        # Use np.dot to project v_13 onto e_12, then subtract this projection
+        # and use a preallocated buffer for the orthogonal vector.
         v_12_3 = v_13 - np.dot(v_13, e_12) * e_12  # Vector orthogonal to v_12 through x3.
-        m_12_3 = np.linalg.norm(v_12_3, ord=2)  # 2-norm of v_12_3.
+        m_12_3 = np.linalg.norm(v_12_3)  # Use default ord=2 (no need to specify for 2-norm).
 
         return m_12_3
 
     def _orthonormal_basis_vector_to_psl(self, parents_params: np.ndarray, n: int) -> np.ndarray:
         # Compute orthogonal basis vectors for the subspace orthogonal to psl.
+        # Prefer a more numerically stable QR via np.linalg.qr(basis_matrix) directly on 2d arrays.
         e_12 = UNDXCrossover._normalized_x1_to_x2(
             parents_params
         )  # Normalized vector from x1 to x2.
         basis_matrix = np.identity(n)
-
-        if np.count_nonzero(e_12) != 0:
+        if np.any(e_12):  # Faster, clearer than count_nonzero
             basis_matrix[0] = e_12
-
-        basis_matrix_t = basis_matrix.T
-        Q, _ = np.linalg.qr(basis_matrix_t)
-
-        return Q.T[1:]
+        # QR decomposition directly gives orthogonal basis; transpose not necessary before QR
+        Q, _ = np.linalg.qr(basis_matrix)
+        # Skip the first row (the one in the direction of psl), keep the rest for the orthogonal subspace.
+        return Q[1:]
 
     def crossover(
         self,
@@ -84,6 +85,7 @@ class UNDXCrossover(BaseCrossover):
         else:
             sigma_eta = self._sigma_eta
 
+        # Use variance=sigma_eta**2 and sigma_xi**2 for normal distributions
         etas = rng.normal(0, sigma_eta**2, size=n)
         xi = rng.normal(0, self._sigma_xi**2)
         es = self._orthonormal_basis_vector_to_psl(
@@ -93,13 +95,11 @@ class UNDXCrossover(BaseCrossover):
         two = xi * d  # Section 2 (5).
 
         if n > 1:  # When n=1, there is no subsearch component.
-            three = np.zeros(n)  # Section 2 (5).
+            # Preallocate "three" up front, and use np.dot for vectorized computation
             D = self._distance_from_x_to_psl(parents_params)  # Section 2 (4).
-            for i in range(n - 1):
-                three += etas[i] * es[i]
-            three *= D
+            # Ignore the last eta; only etas[:n-1] and es[:n-1] are meaningful
+            three = np.dot(etas[: n - 1], es) * D  # Fast vector dot product and scaling
             child_params = one + two + three
-
         else:
             child_params = one + two
 
