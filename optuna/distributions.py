@@ -711,23 +711,24 @@ def _convert_old_distribution_to_new_distribution(
     suppress_warning: bool = False,
 ) -> BaseDistribution:
     new_distribution: BaseDistribution
+    dist_type = type(distribution)
 
     # Float distributions.
-    if isinstance(distribution, UniformDistribution):
+    if dist_type is UniformDistribution:
         new_distribution = FloatDistribution(
             low=distribution.low,
             high=distribution.high,
             log=False,
             step=None,
         )
-    elif isinstance(distribution, LogUniformDistribution):
+    elif dist_type is LogUniformDistribution:
         new_distribution = FloatDistribution(
             low=distribution.low,
             high=distribution.high,
             log=True,
             step=None,
         )
-    elif isinstance(distribution, DiscreteUniformDistribution):
+    elif dist_type is DiscreteUniformDistribution:
         new_distribution = FloatDistribution(
             low=distribution.low,
             high=distribution.high,
@@ -736,14 +737,14 @@ def _convert_old_distribution_to_new_distribution(
         )
 
     # Integer distributions.
-    elif isinstance(distribution, IntUniformDistribution):
+    elif dist_type is IntUniformDistribution:
         new_distribution = IntDistribution(
             low=distribution.low,
             high=distribution.high,
             log=False,
             step=distribution.step,
         )
-    elif isinstance(distribution, IntLogUniformDistribution):
+    elif dist_type is IntLogUniformDistribution:
         new_distribution = IntDistribution(
             low=distribution.low,
             high=distribution.high,
@@ -755,12 +756,14 @@ def _convert_old_distribution_to_new_distribution(
     else:
         new_distribution = distribution
 
-    if new_distribution != distribution and not suppress_warning:
-        message = (
-            f"{distribution} is deprecated and internally converted to"
-            f" {new_distribution}. See https://github.com/optuna/optuna/issues/2941."
-        )
-        warnings.warn(message, FutureWarning)
+    if new_distribution is distribution or suppress_warning:
+        return new_distribution
+
+    message = (
+        f"{distribution} is deprecated and internally converted to"
+        f" {new_distribution}. See https://github.com/optuna/optuna/issues/2941."
+    )
+    warnings.warn(message, FutureWarning)
 
     return new_distribution
 
