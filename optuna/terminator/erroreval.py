@@ -57,13 +57,22 @@ class CrossValidationErrorEvaluator(BaseErrorEvaluator):
             A float representing the statistical error of the objective function.
 
         """
-        trials = [trial for trial in trials if trial.state == TrialState.COMPLETE]
-        assert len(trials) > 0
+        best_value = None
+        best_trial = None
+        direction_is_maximize = study_direction == StudyDirection.MAXIMIZE
+        for trial in trials:
+            if trial.state != TrialState.COMPLETE:
+                continue
+            val = cast(float, trial.value)
+            if (
+                best_trial is None
+                or (direction_is_maximize and val > best_value)
+                or (not direction_is_maximize and val < best_value)
+            ):
+                best_trial = trial
+                best_value = val
 
-        if study_direction == StudyDirection.MAXIMIZE:
-            best_trial = max(trials, key=lambda t: cast(float, t.value))
-        else:
-            best_trial = min(trials, key=lambda t: cast(float, t.value))
+        assert best_trial is not None
 
         best_trial_attrs = best_trial.system_attrs
         if _CROSS_VALIDATION_SCORES_KEY in best_trial_attrs:
