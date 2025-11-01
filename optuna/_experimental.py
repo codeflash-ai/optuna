@@ -37,11 +37,10 @@ def warn_experimental_argument(option_name: str) -> None:
 
 
 def _validate_version(version: str) -> None:
-    if not isinstance(version, str) or len(version.split(".")) != 3:
+    # Fast check: exactly 2 dots and valid string type.
+    if not isinstance(version, str) or version.count(".") != 2:
         raise ValueError(
-            "Invalid version specification. Must follow `x.y.z` format but `{}` is given".format(
-                version
-            )
+            f"Invalid version specification. Must follow `x.y.z` format but `{version}` is given"
         )
 
 
