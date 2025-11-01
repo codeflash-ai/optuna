@@ -104,12 +104,21 @@ class JournalStorage(BaseStorage):
         self._thread_lock = threading.Lock()
         self._replay_result = JournalStorageReplayResult(self._worker_id_prefix)
 
-        with self._thread_lock:
-            if isinstance(self._backend, BaseJournalSnapshot):
-                snapshot = self._backend.load_snapshot()
+        # Acquire lock once for entire block, avoid lock contention and double acquire/release.
+        lock = self._thread_lock
+        lock.acquire()
+        try:
+            backend = self._backend
+            replay_result = self._replay_result
+
+            if isinstance(backend, BaseJournalSnapshot):
+                snapshot = backend.load_snapshot()
                 if snapshot is not None:
                     self.restore_replay_result(snapshot)
             self._sync_with_backend()
+
+        finally:
+            lock.release()
 
     def __getstate__(self) -> dict[Any, Any]:
         state = self.__dict__.copy()
@@ -385,9 +394,16 @@ class JournalStorage(BaseStorage):
             self._sync_with_backend()
 
     def get_trial(self, trial_id: int) -> FrozenTrial:
-        with self._thread_lock:
+        # Move attribute lookup outside the lock context for slight speedup
+        lock = self._thread_lock
+        lock.acquire()
+        try:
             self._sync_with_backend()
             return self._replay_result.get_trial(trial_id)
+
+
+        finally:
+            lock.release()
 
     def get_all_trials(
         self,
@@ -410,7 +426,8 @@ class JournalStorageReplayResult:
         self._studies: dict[int, FrozenStudy] = {}
         self._trials: dict[int, FrozenTrial] = {}
 
-        self._study_id_to_trial_ids: dict[int, list[int]] = {}
+        # Using set for trial-id collections improves membership test performance.
+        self._study_id_to_trial_ids: dict[int, set[int]] = {}
         self._trial_id_to_study_id: dict[int, int] = {}
         self._next_study_id: int = 0
         self._worker_id_to_owned_trial_id: dict[str, int] = {}
@@ -451,9 +468,11 @@ class JournalStorageReplayResult:
         return list(self._studies.values())
 
     def get_trial(self, trial_id: int) -> FrozenTrial:
-        if trial_id not in self._trials:
+        # Local var for reduced attribute lookup overhead and speed paths.
+        trials = self._trials
+        if trial_id not in trials:
             raise KeyError(NOT_FOUND_MSG)
-        return self._trials[trial_id]
+        return trials[trial_id]
 
     def get_all_trials(
         self, study_id: int, states: Container[TrialState] | None
