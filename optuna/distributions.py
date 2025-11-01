@@ -285,11 +285,11 @@ class DiscreteUniformDistribution(FloatDistribution):
         super().__init__(low=low, high=high, step=q)
 
     def _asdict(self) -> dict:
-        d = copy.deepcopy(self.__dict__)
-        d.pop("log")
-
-        step = d.pop("step")
-        d["q"] = step
+        d = {
+            "low": self.low,
+            "high": self.high,
+            "q": self.step,
+        }
         return d
 
     @property
