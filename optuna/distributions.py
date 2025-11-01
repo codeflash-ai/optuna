@@ -245,7 +245,8 @@ class LogUniformDistribution(FloatDistribution):
         super().__init__(low=low, high=high, log=True, step=None)
 
     def _asdict(self) -> dict:
-        d = copy.deepcopy(self.__dict__)
+        # Use shallow copy since attributes are immutable types (float, bool, None)
+        d = self.__dict__.copy()
         d.pop("log")
         d.pop("step")
         return d
