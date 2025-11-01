@@ -26,6 +26,8 @@ from numpy.polynomial import Polynomial
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+_vec_erf = np.vectorize(math.erf, otypes=[float])
+
 
 erx = 8.45062911510467529297e-01
 # /*
@@ -132,7 +134,7 @@ def _erf_right_non_big(x: np.ndarray) -> np.ndarray:
 
 def erf(x: np.ndarray) -> np.ndarray:
     if x.size < 2000:
-        return np.asarray([math.erf(v) for v in x.ravel()]).reshape(x.shape)
+        return _vec_erf(x)
 
     a = np.abs(x).ravel()
     is_not_nan = ~np.isnan(a)
