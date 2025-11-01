@@ -218,7 +218,7 @@ class UniformDistribution(FloatDistribution):
         super().__init__(low=low, high=high, log=False, step=None)
 
     def _asdict(self) -> dict:
-        d = copy.deepcopy(self.__dict__)
+        d = self.__dict__.copy()
         d.pop("log")
         d.pop("step")
         return d
