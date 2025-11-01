@@ -34,7 +34,7 @@ def _is_log_scale(trials: list[FrozenTrial], param: str) -> bool:
         if param in trial.params:
             dist = trial.distributions[param]
 
-            if isinstance(dist, (FloatDistribution, IntDistribution)):
+            if type(dist) is FloatDistribution or type(dist) is IntDistribution:
                 if dist.log:
                     return True
 
