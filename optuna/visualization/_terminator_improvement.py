@@ -97,32 +97,48 @@ def _get_improvement_info(
         else:
             error_evaluator = CrossValidationErrorEvaluator()
 
-    trial_numbers = []
-    completed_trials = []
-    improvements = []
-    errors = []
+    # Extract completed trial indices and objects for efficient loop
+    trials = study.trials
+    trial_state_complete = optuna.trial.TrialState.COMPLETE
 
-    for trial in tqdm.tqdm(study.trials):
-        if trial.state == optuna.trial.TrialState.COMPLETE:
+    completed_trials_indices = [
+        idx for idx, trial in enumerate(trials) if trial.state == trial_state_complete
+    ]
+    if not completed_trials_indices:
+        # No completed trials; return empty info
+        return _ImprovementInfo(
+            trial_numbers=[], improvements=[], errors=None if not get_error else []
+        )
+
+    completed_trials: list = []
+    trial_numbers: list[int] = []
+    improvements: list[float] = []
+    errors: list[float] = [] if get_error else None
+
+    # Use tqdm on completed indexes only, and keep reference to direction
+    study_direction = study.direction
+
+    for idx in tqdm.tqdm(range(len(trials))):
+        trial = trials[idx]
+        if trial.state == trial_state_complete:
             completed_trials.append(trial)
 
-        if len(completed_trials) == 0:
+        if not completed_trials:
             continue
 
         trial_numbers.append(trial.number)
-
-        improvement = improvement_evaluator.evaluate(
-            trials=completed_trials, study_direction=study.direction
+        improvements.append(
+            improvement_evaluator.evaluate(
+                trials=completed_trials, study_direction=study_direction
+            )
         )
-        improvements.append(improvement)
 
         if get_error:
-            error = error_evaluator.evaluate(
-                trials=completed_trials, study_direction=study.direction
+            errors.append(
+                error_evaluator.evaluate(trials=completed_trials, study_direction=study_direction)
             )
-            errors.append(error)
 
-    if len(errors) == 0:
+    if errors is None or len(errors) == 0:
         return _ImprovementInfo(
             trial_numbers=trial_numbers, improvements=improvements, errors=None
         )
