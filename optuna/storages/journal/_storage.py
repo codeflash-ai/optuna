@@ -451,9 +451,10 @@ class JournalStorageReplayResult:
         return list(self._studies.values())
 
     def get_trial(self, trial_id: int) -> FrozenTrial:
-        if trial_id not in self._trials:
+        try:
+            return self._trials[trial_id]
+        except KeyError:
             raise KeyError(NOT_FOUND_MSG)
-        return self._trials[trial_id]
 
     def get_all_trials(
         self, study_id: int, states: Container[TrialState] | None
