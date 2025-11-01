@@ -200,27 +200,41 @@ class HyperbandPruner(BasePruner):
             # In this implementation, we combine this formula and that of ASHA paper
             # https://arxiv.org/abs/1502.07943 as
             # `n_brackets = floor(log_{reduction_factor}(max_resource / min_resource)) + 1`
+            min_resource = self._min_resource
+            reduction_factor = self._reduction_factor
+            max_resource = self._max_resource
             self._n_brackets = (
-                math.floor(
-                    math.log(self._max_resource / self._min_resource, self._reduction_factor)
-                )
-                + 1
+                math.floor(math.log(max_resource / min_resource, reduction_factor)) + 1
             )
 
-        _logger.debug("Hyperband has {} brackets".format(self._n_brackets))
+        n_brackets = self._n_brackets
+        pruners = []
+        trial_allocation_budgets = []
+        total_trial_allocation_budget = 0
+        min_resource = self._min_resource
+        reduction_factor = self._reduction_factor
+        bootstrap_count = self._bootstrap_count
 
-        for bracket_id in range(self._n_brackets):
-            trial_allocation_budget = self._calculate_trial_allocation_budget(bracket_id)
-            self._total_trial_allocation_budget += trial_allocation_budget
-            self._trial_allocation_budgets.append(trial_allocation_budget)
+        for bracket_id in range(n_brackets):
+            s = n_brackets - 1 - bracket_id
+            reduction_factor_power_s = pow(reduction_factor, s)
+            allocation_budget = math.ceil(n_brackets * reduction_factor_power_s / (s + 1))
+            total_trial_allocation_budget += allocation_budget
+            trial_allocation_budgets.append(allocation_budget)
 
             pruner = SuccessiveHalvingPruner(
-                min_resource=self._min_resource,
-                reduction_factor=self._reduction_factor,
+                min_resource=min_resource,
+                reduction_factor=reduction_factor,
                 min_early_stopping_rate=bracket_id,
-                bootstrap_count=self._bootstrap_count,
+                bootstrap_count=bootstrap_count,
             )
-            self._pruners.append(pruner)
+            pruners.append(pruner)
+
+        self._pruners = pruners
+        self._trial_allocation_budgets = trial_allocation_budgets
+        self._total_trial_allocation_budget = total_trial_allocation_budget
+
+        _logger.debug("Hyperband has {} brackets".format(n_brackets))
 
     def _calculate_trial_allocation_budget(self, bracket_id: int) -> int:
         """Compute the trial allocated budget for a bracket of ``bracket_id``.
