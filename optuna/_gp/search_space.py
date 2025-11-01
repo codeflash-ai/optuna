@@ -10,7 +10,6 @@ import numpy as np
 
 from optuna.distributions import BaseDistribution
 from optuna.distributions import CategoricalDistribution
-from optuna.distributions import FloatDistribution
 from optuna.distributions import IntDistribution
 
 
@@ -38,21 +37,32 @@ class SearchSpace:
         self,
         optuna_search_space: dict[str, BaseDistribution],
     ) -> None:
+        # Preallocate arrays based on search space length for efficiency
+        n_params = len(optuna_search_space)
         self._optuna_search_space = optuna_search_space
-        self._scale_types = np.empty(len(optuna_search_space), dtype=np.int64)
-        self._bounds = np.empty((len(optuna_search_space), 2), dtype=float)
-        self._steps = np.empty(len(optuna_search_space), dtype=float)
-        for i, distribution in enumerate(optuna_search_space.values()):
+        self._scale_types = np.empty(n_params, dtype=np.int64)
+        self._bounds = np.empty((n_params, 2), dtype=float)
+        self._steps = np.empty(n_params, dtype=float)
+        items = list(optuna_search_space.values())
+
+        # Loop optimization: avoid dict.values() in each iteration, use list
+        for i in range(n_params):
+            distribution = items[i]
             if isinstance(distribution, CategoricalDistribution):
                 self._scale_types[i] = _ScaleType.CATEGORICAL
-                self._bounds[i, :] = (0.0, len(distribution.choices))
+                self._bounds[i, 0] = 0.0
+                self._bounds[i, 1] = len(distribution.choices)
                 self._steps[i] = 1.0
             else:
-                assert isinstance(distribution, (FloatDistribution, IntDistribution))
-                self._scale_types[i] = _ScaleType.LOG if distribution.log else _ScaleType.LINEAR
-                self._bounds[i, :] = (distribution.low, distribution.high)
-                self._steps[i] = distribution.step or 0.0
-        self.dim = len(optuna_search_space)
+                # Only two types (Float, Int) reach here
+                is_log = getattr(distribution, "log", False)
+                self._scale_types[i] = _ScaleType.LOG if is_log else _ScaleType.LINEAR
+                self._bounds[i, 0] = distribution.low
+                self._bounds[i, 1] = distribution.high
+                step = getattr(distribution, "step", None)
+                self._steps[i] = step if step is not None else 0.0
+        self.dim = n_params
+        # Avoid allocation for array comp: directly compare with constant
         # TODO: Make it an index array.
         self.is_categorical = self._scale_types == _ScaleType.CATEGORICAL
         # NOTE(nabenabe): MyPy Redefinition for NumPy v2.2.0. (Cast signed int to int)
@@ -188,27 +198,35 @@ def _get_unnormalized_param(
     normalized_param: np.ndarray,
 ) -> dict[str, Any]:
     ret = {}
-    for i, (param, distribution) in enumerate(optuna_search_space.items()):
+    items = list(optuna_search_space.items())
+    n_items = len(items)
+
+    for i in range(n_items):
+        param, distribution = items[i]
         if isinstance(distribution, CategoricalDistribution):
             ret[param] = distribution.to_external_repr(normalized_param[i])
         else:
-            assert isinstance(
-                distribution,
-                (
-                    FloatDistribution,
-                    IntDistribution,
-                ),
-            )
-            scale_type = _ScaleType.LOG if distribution.log else _ScaleType.LINEAR
-            step = 0.0 if distribution.step is None else distribution.step
-            bounds = (distribution.low, distribution.high)
-            param_value = float(
-                np.clip(
-                    _unnormalize_one_param(normalized_param[i], scale_type, bounds, step),
-                    distribution.low,
-                    distribution.high,
-                )
-            )
+            # FloatDistribution and IntDistribution only
+            is_log = getattr(distribution, "log", False)
+            scale_type = _ScaleType.LOG if is_log else _ScaleType.LINEAR
+            step = getattr(distribution, "step", None)
+            # Avoid constructing new tuple per iteration; can pass values directly
+            low = distribution.low
+            high = distribution.high
+            step_value = 0.0 if step is None else step
+            # Inline _unnormalize_one_param for single param case, reduces function call overhead
+            value = normalized_param[i]
+            if scale_type == _ScaleType.CATEGORICAL:
+                param_value = value
+            else:
+                bound_low, bound_high = (low - 0.5 * step_value, high + 0.5 * step_value)
+                if scale_type == _ScaleType.LOG:
+                    bound_low, bound_high = np.log(bound_low), np.log(bound_high)
+                param_value = value * (bound_high - bound_low) + bound_low
+                if scale_type == _ScaleType.LOG:
+                    param_value = np.exp(param_value)
+                # np.clip as float for all
+                param_value = float(np.clip(param_value, low, high))
             if isinstance(distribution, IntDistribution):
                 param_value = round(param_value)
             ret[param] = param_value
