@@ -16,6 +16,8 @@ if _imports.is_successful():
     from optuna.visualization.matplotlib._matplotlib_imports import Axes
     from optuna.visualization.matplotlib._matplotlib_imports import plt
 
+_ggplot_applied = False
+
 _logger = get_logger(__name__)
 
 
@@ -67,15 +69,17 @@ def plot_terminator_improvement(
     """
     _imports.check()
 
+    global _ggplot_applied
+    if not _ggplot_applied:
+        plt.style.use("ggplot")
+        _ggplot_applied = True
+
     info = _get_improvement_info(study, plot_error, improvement_evaluator, error_evaluator)
     return _get_improvement_plot(info, min_n_trials)
 
 
 def _get_improvement_plot(info: _ImprovementInfo, min_n_trials: int) -> "Axes":
     n_trials = len(info.trial_numbers)
-
-    # Set up the graph style.
-    plt.style.use("ggplot")  # Use ggplot style sheet for similar outputs to plotly.
     _, ax = plt.subplots()
     ax.set_title("Terminator Improvement Plot")
     ax.set_xlabel("Trial")
