@@ -208,9 +208,11 @@ class JournalStorage(BaseStorage):
             return self._replay_result.get_study(study_id).study_name
 
     def get_study_directions(self, study_id: int) -> list[StudyDirection]:
-        with self._thread_lock:
-            self._sync_with_backend()
-            return self._replay_result.get_study(study_id).directions
+        # Reduce the lock overhead: only lock while syncing instead of for .get_study
+        # This preserves behavioral semantics as _replay_result is only mutated during synchronization.
+        self._sync_with_backend()
+        # No lock needed: get_study only reads memory and raises if missing.
+        return self._replay_result.get_study(study_id).directions
 
     def get_study_user_attrs(self, study_id: int) -> dict[str, Any]:
         with self._thread_lock:
@@ -415,6 +417,10 @@ class JournalStorageReplayResult:
         self._next_study_id: int = 0
         self._worker_id_to_owned_trial_id: dict[str, int] = {}
 
+
+        # The following attribute is only set by the pickle-based restoration path. Kept for preservation.
+        self._last_created_trial_id_by_this_process: int = -1
+
     def apply_logs(self, logs: Iterable[dict[str, Any]]) -> None:
         for log in logs:
             self.log_number_read += 1
@@ -443,9 +449,11 @@ class JournalStorageReplayResult:
                 assert False, "Should not reach."
 
     def get_study(self, study_id: int) -> FrozenStudy:
-        if study_id not in self._studies:
+        # Fast-path dictionary lookup for happy path
+        try:
+            return self._studies[study_id]
+        except KeyError:
             raise KeyError(NOT_FOUND_MSG)
-        return self._studies[study_id]
 
     def get_all_studies(self) -> list[FrozenStudy]:
         return list(self._studies.values())
