@@ -66,18 +66,20 @@ def plot_hypervolume_history(
 def _get_hypervolume_history_plot(
     info: _HypervolumeHistoryInfo,
 ) -> "go.Figure":
-    layout = go.Layout(
-        title="Hypervolume History Plot",
-        xaxis={"title": "Trial"},
-        yaxis={"title": "Hypervolume"},
-    )
+    layout = {
+        "title": "Hypervolume History Plot",
+        "xaxis": {"title": "Trial"},
+        "yaxis": {"title": "Hypervolume"},
+    }
 
-    data = go.Scatter(
-        x=info.trial_numbers,
-        y=info.values,
-        mode="lines+markers",
-    )
-    return go.Figure(data=data, layout=layout)
+    data = {
+        "type": "scatter",
+        "x": info.trial_numbers,
+        "y": info.values,
+        "mode": "lines+markers",
+    }
+
+    return go.Figure(data=[data], layout=layout)
 
 
 def _get_hypervolume_history_info(
