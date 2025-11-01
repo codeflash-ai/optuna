@@ -48,24 +48,24 @@ class UNDXCrossover(BaseCrossover):
         )  # Normalized vector from x1 to x2.
         v_13 = parents_params[2] - parents_params[0]  # Vector from x1 to x3.
         v_12_3 = v_13 - np.dot(v_13, e_12) * e_12  # Vector orthogonal to v_12 through x3.
-        m_12_3 = np.linalg.norm(v_12_3, ord=2)  # 2-norm of v_12_3.
+        m_12_3 = np.sqrt(np.dot(v_12_3, v_12_3))  # 2-norm of v_12_3.
 
         return m_12_3
 
     def _orthonormal_basis_vector_to_psl(self, parents_params: np.ndarray, n: int) -> np.ndarray:
         # Compute orthogonal basis vectors for the subspace orthogonal to psl.
-        e_12 = UNDXCrossover._normalized_x1_to_x2(
-            parents_params
-        )  # Normalized vector from x1 to x2.
-        basis_matrix = np.identity(n)
+        e_12 = UNDXCrossover._normalized_x1_to_x2(parents_params)
+        basis_matrix = np.identity(n, dtype=parents_params.dtype)
 
         if np.count_nonzero(e_12) != 0:
             basis_matrix[0] = e_12
 
-        basis_matrix_t = basis_matrix.T
-        Q, _ = np.linalg.qr(basis_matrix_t)
-
-        return Q.T[1:]
+        # Directly QR-decompose the basis matrix, NOT its transpose.
+        # This produces a Q whose first row = basis_matrix[0] (e_12)
+        # and the rest are the orthogonal basis.
+        Q, _ = np.linalg.qr(basis_matrix)
+        # Return all but the first row
+        return Q[1:]
 
     def crossover(
         self,
@@ -86,22 +86,18 @@ class UNDXCrossover(BaseCrossover):
 
         etas = rng.normal(0, sigma_eta**2, size=n)
         xi = rng.normal(0, self._sigma_xi**2)
-        es = self._orthonormal_basis_vector_to_psl(
-            parents_params, n
-        )  # Orthonormal basis vectors of the subspace orthogonal to the psl.
-        one = xp  # Section 2 (5).
-        two = xi * d  # Section 2 (5).
 
         if n > 1:  # When n=1, there is no subsearch component.
-            three = np.zeros(n)  # Section 2 (5).
+            es = self._orthonormal_basis_vector_to_psl(parents_params, n)
+            # Orthonormal basis vectors are shape (n-1, n)
+            # Vectorized dot product: (n-1,) * (n-1, n) -> (n,)
+            three = np.dot(etas[: n - 1], es)
             D = self._distance_from_x_to_psl(parents_params)  # Section 2 (4).
-            for i in range(n - 1):
-                three += etas[i] * es[i]
             three *= D
-            child_params = one + two + three
+            child_params = xp + xi * d + three
 
         else:
-            child_params = one + two
+            child_params = xp + xi * d
 
         return child_params
 
