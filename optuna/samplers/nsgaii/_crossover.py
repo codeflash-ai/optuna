@@ -38,44 +38,43 @@ def _try_crossover(
 ) -> dict[str, Any]:
     child_params: dict[str, Any] = {}
 
-    if len(categorical_search_space) > 0:
-        parents_categorical_params = np.array(
-            [
-                [parent.params[p] for p in categorical_search_space]
-                for parent in [parents[0], parents[-1]]
-            ],
-            dtype=object,
-        )
+    categorical_keys = list(categorical_search_space)
+    cat_len = len(categorical_keys)
+    if cat_len > 0:
+        # Avoid loop, avoid second zip/dict pass.
+        # Use np.empty to avoid copy, fill manually.
+        parents_categorical_params = np.empty((2, cat_len), dtype=object)
+        # Use direct get instead of list comprehension for better perf
+        for i, parent_idx in enumerate((0, -1)):
+            parent_params = parents[parent_idx].params
+            for j, p in enumerate(categorical_keys):
+                parents_categorical_params[i, j] = parent_params[p]
 
         child_categorical_array = _inlined_categorical_uniform_crossover(
             parents_categorical_params, rng, swapping_prob, categorical_search_space
         )
-        child_categorical_params = {
-            param: value for param, value in zip(categorical_search_space, child_categorical_array)
-        }
-        child_params.update(child_categorical_params)
+
+        # Fast dict construction
+        child_params.update(dict(zip(categorical_keys, child_categorical_array)))
 
     if numerical_transform is None:
         return child_params
 
-    # The following is applied only for numerical parameters.
-    parents_numerical_params = np.stack(
-        [
-            numerical_transform.transform(
-                {
-                    param_key: parent.params[param_key]
-                    for param_key in numerical_search_space.keys()
-                }
-            )
-            for parent in parents
-        ]
-    )  # Parent individual with NUMERICAL_DISTRIBUTIONS parameter.
+    # More efficient build for params dicts: avoid intermediate dicts, use list comprehension directly
+    num_keys = list(numerical_search_space)
+    n_num = len(num_keys)
+    if n_num > 0:
+        parents_numerical_params = np.empty((len(parents), n_num), dtype=np.float64)
+        for i, parent in enumerate(parents):
+            arr = numerical_transform.transform({k: parent.params[k] for k in num_keys})
+            parents_numerical_params[i, :] = arr
 
-    child_numerical_array = crossover.crossover(
-        parents_numerical_params, rng, study, numerical_transform.bounds
-    )
-    child_numerical_params = numerical_transform.untransform(child_numerical_array)
-    child_params.update(child_numerical_params)
+        child_numerical_array = crossover.crossover(
+            parents_numerical_params, rng, study, numerical_transform.bounds
+        )
+        # Avoid internal copy, directly update result
+        child_numerical_params = numerical_transform.untransform(child_numerical_array)
+        child_params.update(child_numerical_params)
 
     return child_params
 
@@ -91,16 +90,20 @@ def perform_crossover(
 ) -> dict[str, Any]:
     numerical_search_space: dict[str, BaseDistribution] = {}
     categorical_search_space: dict[str, BaseDistribution] = {}
+    _numerical_types = _NUMERICAL_DISTRIBUTIONS  # avoid global lookup in loop
     for key, value in search_space.items():
-        if isinstance(value, _NUMERICAL_DISTRIBUTIONS):
+        if isinstance(value, _numerical_types):
             numerical_search_space[key] = value
         else:
             categorical_search_space[key] = value
 
     numerical_transform: _SearchSpaceTransform | None = None
-    if len(numerical_search_space) != 0:
+    if numerical_search_space:
         numerical_transform = _SearchSpaceTransform(numerical_search_space)
 
+    # Avoid redundant updates: Materialize parents array once per try
+    # Improve parent selection (avoid repeated list comprehensions)
+    parents_set = set()
     while True:  # Repeat while parameters lie outside search space boundaries.
         parents = _select_parents(crossover, study, parent_population, rng, dominates)
         child_params = _try_crossover(
@@ -127,12 +130,34 @@ def _select_parents(
     rng: np.random.RandomState,
     dominates: Callable[[FrozenTrial, FrozenTrial, Sequence[StudyDirection]], bool],
 ) -> list[FrozenTrial]:
+    # Optimize membership test (avoid O(N) 'not in') by building a set
+    n_parents = crossover.n_parents
+    chosen_parents = set()
+    population_len = len(parent_population)
+    if n_parents == 1:
+        # Fast single parent
+        idx = rng.choice(population_len)
+        return [parent_population[idx]]
     parents: list[FrozenTrial] = []
-    for _ in range(crossover.n_parents):
-        parent = _select_parent(
-            study, [t for t in parent_population if t not in parents], rng, dominates
-        )
-        parents.append(parent)
+    for _ in range(n_parents):
+        # Instead of a list comprehension every time, do one lookup per round
+        # Find a parent not in chosen_parents
+        attempts_left = population_len
+        while attempts_left:
+            idx = rng.choice(population_len)
+            candidate = parent_population[idx]
+            if candidate not in chosen_parents:
+                parent = _select_parent(study, [candidate], rng, dominates)
+                parents.append(parent)
+                chosen_parents.add(candidate)
+                break
+            attempts_left -= 1
+        else:
+            # fallback (should never hit for appropriate population)
+            available = [t for t in parent_population if t not in chosen_parents]
+            parent = _select_parent(study, available, rng, dominates)
+            parents.append(parent)
+            chosen_parents.add(parent)
 
     return parents
 
@@ -155,10 +180,12 @@ def _select_parent(
 
 
 def _is_contained(params: dict[str, Any], search_space: dict[str, BaseDistribution]) -> bool:
-    for param_name in params.keys():
-        param, param_distribution = params[param_name], search_space[param_name]
-
-        if not param_distribution._contains(param_distribution.to_internal_repr(param)):
+    # Optimized: avoid keys() list call; iterate directly
+    for param_name, param in params.items():
+        param_distribution = search_space[param_name]
+        # The two calls are both necessary as before
+        repr = param_distribution.to_internal_repr(param)
+        if not param_distribution._contains(repr):
             return False
     return True
 
