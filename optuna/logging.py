@@ -14,6 +14,8 @@ import threading
 
 import colorlog
 
+_library_root_logger: logging.Logger | None = None
+
 
 __all__ = [
     "CRITICAL",
@@ -60,7 +62,12 @@ def _get_library_name() -> str:
 
 
 def _get_library_root_logger() -> logging.Logger:
-    return logging.getLogger(_get_library_name())
+    global _library_root_logger
+    if _library_root_logger is not None:
+        return _library_root_logger
+    logger = logging.getLogger(_get_library_name())
+    _library_root_logger = logger
+    return logger
 
 
 def _configure_library_root_logger() -> None:
