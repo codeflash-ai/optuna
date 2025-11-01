@@ -96,6 +96,8 @@ class Study:
         self._thread_local = _ThreadLocalStudyAttribute()
         self._stop_flag = False
 
+        self._default_trials_cache = None  # Cache for default get_trials() calls
+
     def __getstate__(self) -> dict[Any, Any]:
         state = self.__dict__.copy()
         del state["_thread_local"]
@@ -264,6 +266,12 @@ class Study:
         Returns:
             A list of :class:`~optuna.trial.FrozenTrial` objects.
         """
+        if deepcopy and states is None:
+            if self._default_trials_cache is None:
+                self._default_trials_cache = self._get_trials(deepcopy, states, use_cache=False)
+            return self._default_trials_cache
+        # Invalidate cache if parameters differ or for mutative access
+        self._default_trials_cache = None
         return self._get_trials(deepcopy, states, use_cache=False)
 
     def _get_trials(
