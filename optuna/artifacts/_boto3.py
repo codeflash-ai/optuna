@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from optuna._imports import try_import
 from optuna.artifacts.exceptions import ArtifactNotFound
+from botocore.exceptions import ClientError
 
 
 if TYPE_CHECKING:
@@ -94,9 +95,15 @@ class Boto3ArtifactStore:
 
 
 def _is_not_found_error(e: ClientError) -> bool:
-    error_code = e.response.get("Error", {}).get("Code")
-    http_status_code = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-    return error_code == "NoSuchKey" or http_status_code == 404
+    # Fast path: avoid nested get by caching dicts once
+    err = e.response
+    error = err.get("Error")
+    if error is not None and error.get("Code") == "NoSuchKey":
+        return True
+    response_meta = err.get("ResponseMetadata")
+    if response_meta is not None and response_meta.get("HTTPStatusCode") == 404:
+        return True
+    return False
 
 
 if TYPE_CHECKING:
