@@ -172,7 +172,10 @@ def _get_trans_params(trials: list[FrozenTrial], trans: _SearchSpaceTransform) -
 def _get_target_values(
     trials: list[FrozenTrial], target: Callable[[FrozenTrial], float] | None
 ) -> np.ndarray:
-    return np.array([target(trial) if target is not None else trial.value for trial in trials])
+    if target is not None:
+        return np.array([target(trial) for trial in trials])
+    else:
+        return np.array([trial.value for trial in trials])
 
 
 def _sort_dict_by_importance(param_importances: dict[str, float]) -> dict[str, float]:
