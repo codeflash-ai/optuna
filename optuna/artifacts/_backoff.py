@@ -64,7 +64,8 @@ class Backoff:
         self._max_delay = max_delay
 
     def _get_sleep_secs(self, n_retry: int) -> float:
-        return min(self._min_delay * self._multiplier**n_retry, self._max_delay)
+        delay = self._min_delay * self._multiplier**n_retry
+        return delay if delay < self._max_delay else self._max_delay
 
     def open_reader(self, artifact_id: str) -> BinaryIO:
         for i in range(self._max_retries):
