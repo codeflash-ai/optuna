@@ -198,16 +198,19 @@ def _get_importances_plot(infos: tuple[_ImportancesInfo, ...], study: Study) -> 
 
 
 def _get_distribution(param_name: str, study: Study) -> BaseDistribution:
-    for trial in study.trials:
-        if param_name in trial.distributions:
-            return trial.distributions[param_name]
-    assert False
+    try:
+        return next(
+            trial.distributions[param_name]
+            for trial in study.trials
+            if param_name in trial.distributions
+        )
+    except StopIteration:
+        assert False
 
 
 def _make_hovertext(param_name: str, importance: float, study: Study) -> str:
-    return "{} ({}): {}<extra></extra>".format(
-        param_name, _get_distribution(param_name, study).__class__.__name__, importance
-    )
+    dist = _get_distribution(param_name, study)
+    return f"{param_name} ({dist.__class__.__name__}): {importance}<extra></extra>"
 
 
 def _get_hover_template(importances_info: _ImportancesInfo, study: Study) -> list[str]:
