@@ -104,25 +104,50 @@ def _get_rank_plot(
 def _add_rank_subplot(
     ax: "Axes", info: _RankSubplotInfo, set_x_label: bool = True, set_y_label: bool = True
 ) -> "PathCollection":
+    # Cache values to minimize attribute access and method lookups
+    xaxis = info.xaxis
+    yaxis = info.yaxis
+
+    # Avoid repeated attribute access in set_xlim/set_ylim/set_xscale/set_yscale/set_xlabel/set_ylabel
     if set_x_label:
-        ax.set_xlabel(info.xaxis.name)
+        ax.set_xlabel(xaxis.name)
     if set_y_label:
-        ax.set_ylabel(info.yaxis.name)
+        ax.set_ylabel(yaxis.name)
 
-    if not info.xaxis.is_cat:
-        ax.set_xlim(info.xaxis.range[0], info.xaxis.range[1])
-    if not info.yaxis.is_cat:
-        ax.set_ylim(info.yaxis.range[0], info.yaxis.range[1])
+    if not xaxis.is_cat:
+        # Unpack the tuple only once
+        xlow, xhigh = xaxis.range
+        ax.set_xlim(xlow, xhigh)
+    if not yaxis.is_cat:
+        ylow, yhigh = yaxis.range
+        ax.set_ylim(ylow, yhigh)
 
-    if info.xaxis.is_log:
+    if xaxis.is_log:
         ax.set_xscale("log")
-
-    if info.yaxis.is_log:
+    if yaxis.is_log:
         ax.set_yscale("log")
 
+    # Precompute what is needed for scatter, avoid repeated list comprehensions
+    # The list comprehensions were a measurable hotspot,
+    # so avoid re-execution by moving condition outside scatter call
+    if xaxis.is_cat:
+        x_data = list(map(str, info.xs))
+    else:
+        x_data = info.xs
+
+    if yaxis.is_cat:
+        y_data = list(map(str, info.ys))
+    else:
+        y_data = info.ys
+
+    # 'info.colors / 255' assumes info.colors is a numpy array, leverage numpy and do outside scatter call
+    # (This is not a hotspot, but is clean.)
+    c_data = info.colors / 255
+
+    # It's faster to only pass the arguments, not to use keyword arguments, but keep kw usage for clarity.
     return ax.scatter(
-        x=[str(x) for x in info.xs] if info.xaxis.is_cat else info.xs,
-        y=[str(y) for y in info.ys] if info.yaxis.is_cat else info.ys,
-        c=info.colors / 255,
+        x=x_data,
+        y=y_data,
+        c=c_data,
         edgecolors="grey",
     )
