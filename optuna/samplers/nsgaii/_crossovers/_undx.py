@@ -43,12 +43,20 @@ class UNDXCrossover(BaseCrossover):
     def _distance_from_x_to_psl(self, parents_params: np.ndarray) -> np.floating:
         # The line connecting x1 to x2 is called psl (primary search line).
         # Compute the 2-norm of the vector orthogonal to psl from x3.
-        e_12 = UNDXCrossover._normalized_x1_to_x2(
-            parents_params
-        )  # Normalized vector from x1 to x2.
-        v_13 = parents_params[2] - parents_params[0]  # Vector from x1 to x3.
-        v_12_3 = v_13 - np.dot(v_13, e_12) * e_12  # Vector orthogonal to v_12 through x3.
-        m_12_3 = np.linalg.norm(v_12_3, ord=2)  # 2-norm of v_12_3.
+        # --- Optimize: inline and batch linalg, reduce temp arrays ---
+        x1 = parents_params[0]
+        x2 = parents_params[1]
+        x3 = parents_params[2]
+        v_12 = x2 - x1
+        # Avoid calling np.linalg.norm() for scalar sqrt(dot(x, x))
+        m_12 = np.sqrt(np.dot(v_12, v_12))
+        # Use np.clip only on the scalar
+        m_12_clipped = m_12 if m_12 >= 1e-10 else 1e-10
+        e_12 = v_12 / m_12_clipped
+        v_13 = x3 - x1  # Vector from x1 to x3.
+        proj = np.dot(v_13, e_12)
+        v_12_3 = v_13 - proj * e_12  # Vector orthogonal to v_12 through x3.
+        m_12_3 = np.sqrt(np.dot(v_12_3, v_12_3))  # Faster than np.linalg.norm(v, 2)
 
         return m_12_3
 
