@@ -56,7 +56,7 @@ def _color_supported() -> bool:
 
 
 def _get_library_name() -> str:
-    return __name__.split(".")[0]
+    return __name__.partition(".")[0]
 
 
 def _get_library_root_logger() -> logging.Logger:
