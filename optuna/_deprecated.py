@@ -42,9 +42,11 @@ _DEPRECATION_WARNING_TEMPLATE = (
 def _validate_two_version(old_version: str, new_version: str) -> None:
     if version.parse(old_version) > version.parse(new_version):
         raise ValueError(
-            "Invalid version relationship. The deprecated version must be smaller than "
-            "the removed version, but (deprecated version, removed version) = ({}, {}) are "
-            "specified.".format(old_version, new_version)
+            (
+                f"Invalid version relationship. The deprecated version must be smaller than "
+                f"the removed version, but (deprecated version, removed version) = ({old_version}, "
+                f"{new_version}) are specified."
+            )
         )
 
 
