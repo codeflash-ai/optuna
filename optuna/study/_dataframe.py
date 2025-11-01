@@ -39,46 +39,57 @@ def _create_records_and_aggregate_column(
 
     metric_names = study.metric_names
 
-    records = []
-    for trial in study.get_trials(deepcopy=False):
+    # Local binding for performance
+    get_trials = study.get_trials
+    directions = study.directions
+
+    append_record = records_append = []
+    records = records_append
+    for trial in get_trials(deepcopy=False):
         record = {}
+        trial_getattr = getattr
         for attr, df_column in attrs_to_df_columns.items():
-            value = getattr(trial, attr)
+            value = trial_getattr(trial, attr)
             if isinstance(value, TrialState):
                 value = value.name
             if isinstance(value, dict):
                 for nested_attr, nested_value in value.items():
-                    record[(df_column, nested_attr)] = nested_value
-                    column_agg[attr].add((df_column, nested_attr))
+                    key = (df_column, nested_attr)
+                    record[key] = nested_value
+                    column_agg[attr].add(key)
             elif attr == "values":
-                # Expand trial.values.
-                # trial.values should be None when the trial's state is FAIL or PRUNED.
-                trial_values = [None] * len(study.directions) if value is None else value
+                trial_values = [None] * len(directions) if value is None else value
                 iterator = (
                     enumerate(trial_values)
                     if metric_names is None
                     else zip(metric_names, trial_values)
                 )
                 for nested_attr, nested_value in iterator:
-                    record[(df_column, nested_attr)] = nested_value
-                    column_agg[attr].add((df_column, nested_attr))
+                    key = (df_column, nested_attr)
+                    record[key] = nested_value
+                    column_agg[attr].add(key)
             elif isinstance(value, list):
                 for nested_attr, nested_value in enumerate(value):
-                    record[(df_column, nested_attr)] = nested_value
-                    column_agg[attr].add((df_column, nested_attr))
+                    key = (df_column, nested_attr)
+                    record[key] = nested_value
+                    column_agg[attr].add(key)
             elif attr == "value":
                 nested_attr = non_nested_attr if metric_names is None else metric_names[0]
-                record[(df_column, nested_attr)] = value
-                column_agg[attr].add((df_column, nested_attr))
+                key = (df_column, nested_attr)
+                record[key] = value
+                column_agg[attr].add(key)
             else:
-                record[(df_column, non_nested_attr)] = value
-                column_agg[attr].add((df_column, non_nested_attr))
+                key = (df_column, non_nested_attr)
+                record[key] = value
+                column_agg[attr].add(key)
 
         records.append(record)
 
-    columns: list[tuple[str, str]] = sum(
-        (sorted(column_agg[k]) for k in attrs if k in column_agg), []
-    )
+    columns: list[tuple[str, str]] = []
+    # Use list.extend for better performance (avoids sum of lists)
+    for k in attrs:
+        if k in column_agg:
+            columns.extend(sorted(column_agg[k]))
 
     return records, columns
 
