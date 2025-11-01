@@ -45,7 +45,12 @@ class UniformCrossover(BaseCrossover):
         # Section 1 Introduction
 
         n_params = len(search_space_bounds)
-        masks = (rng.rand(n_params) >= self._swapping_prob).astype(int)
-        child_params = parents_params[masks, range(n_params)]
+        # Generate all random values in a single call for efficiency
+        rand_vals = rng.rand(n_params)
+        # Instead of converting to int, use boolean mask directly for indexing
+        # By definition: select from parent 1 if rand >= swapping_prob else from parent 0
+        select_parent1_mask = rand_vals >= self._swapping_prob
+        # Use boolean indexing for direct selection; avoids allocation of int array and is faster
+        child_params = np.where(select_parent1_mask, parents_params[1], parents_params[0])
 
         return child_params
