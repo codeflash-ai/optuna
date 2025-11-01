@@ -196,11 +196,11 @@ class StorageSupplier(AbstractContextManager):
 
 
 def _find_free_port() -> int:
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    for port in range(13000, 13100):
-        try:
-            sock.bind(("localhost", port))
-            return port
-        except OSError:
-            continue
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        for port in range(13000, 13100):
+            try:
+                sock.bind(("localhost", port))
+                return port
+            except OSError:
+                continue
     assert False, "must not reach here"
