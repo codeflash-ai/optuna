@@ -41,6 +41,14 @@ import numpy as np
 
 from optuna.samplers._tpe._erf import erf
 
+_SQRT2 = 2**0.5
+
+_ONE_OVER_SQRT2 = 1 / _SQRT2
+
+_HALF = 0.5
+
+_LOG_2PI_HALF = 0.5 * math.log(2 * math.pi)
+
 
 _norm_pdf_C = math.sqrt(2 * math.pi)
 _norm_pdf_logC = math.log(_norm_pdf_C)
@@ -58,14 +66,14 @@ def _log_diff(log_p: np.ndarray, log_q: np.ndarray) -> np.ndarray:
 
 @functools.lru_cache(1000)
 def _ndtr_single(a: float) -> float:
-    x = a / 2**0.5
+    x = a / _SQRT2
 
-    if x < -1 / 2**0.5:
-        y = 0.5 * math.erfc(-x)
-    elif x < 1 / 2**0.5:
-        y = 0.5 + 0.5 * math.erf(x)
+    if x < -_ONE_OVER_SQRT2:
+        y = _HALF * math.erfc(-x)
+    elif x < _ONE_OVER_SQRT2:
+        y = _HALF + _HALF * math.erf(x)
     else:
-        y = 1.0 - 0.5 * math.erfc(x)
+        y = 1.0 - _HALF * math.erfc(x)
 
     return y
 
@@ -82,22 +90,29 @@ def _log_ndtr_single(a: float) -> float:
     if a > -20:
         return math.log(_ndtr_single(a))
 
-    log_LHS = -0.5 * a**2 - math.log(-a) - 0.5 * math.log(2 * math.pi)
+    # Slow path for a <= -20
+    a2 = a * a
+    log_LHS = -0.5 * a2 - math.log(-a) - _LOG_2PI_HALF
+    # Initialize variables for series expansion loop
     last_total = 0.0
     right_hand_side = 1.0
     numerator = 1.0
     denom_factor = 1.0
-    denom_cons = 1 / a**2
+    denom_cons = 1 / a2
     sign = 1
     i = 0
+    eps = sys.float_info.epsilon
 
-    while abs(last_total - right_hand_side) > sys.float_info.epsilon:
+    # Use local variables and minimize attribute lookups for loop performance
+    abs_diff = abs(last_total - right_hand_side)
+    while abs_diff > eps:
         i += 1
         last_total = right_hand_side
         sign = -sign
         denom_factor *= denom_cons
         numerator *= 2 * i - 1
         right_hand_side += sign * numerator * denom_factor
+        abs_diff = abs(last_total - right_hand_side)
 
     return log_LHS + math.log(right_hand_side)
 
