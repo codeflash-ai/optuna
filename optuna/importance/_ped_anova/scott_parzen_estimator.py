@@ -102,9 +102,18 @@ def _get_grids_and_grid_indices_of_trials(
         assert not dist.log, "log must be False when step is not None."
         n_steps = min(round((dist.high - dist.low) / dist.step) + 1, n_steps)
 
-    scaler = np.log if dist.log else np.asarray
-    grids = np.linspace(scaler(dist.low), scaler(dist.high), n_steps)
-    params = scaler([t.params[param_name] for t in trials])
+    log = dist.log
+    if log:
+        # Vectorize log computation for grids and params
+        low_log = np.log(dist.low)
+        high_log = np.log(dist.high)
+        grids = np.linspace(low_log, high_log, n_steps)
+        params = np.log(np.fromiter((t.params[param_name] for t in trials), dtype=np.float64, count=len(trials)))
+    else:
+        grids = np.linspace(dist.low, dist.high, n_steps)
+        # Use np.fromiter for minimal allocation and direct float conversion
+        params = np.fromiter((t.params[param_name] for t in trials), dtype=np.float64, count=len(trials))
+    
     step_size = grids[1] - grids[0]
     # grids[indices[n] - 1] < param - step_size / 2 <= grids[indices[n]]
     indices = np.searchsorted(grids, params - step_size / 2)
@@ -120,10 +129,19 @@ def _count_numerical_param_in_grid(
     n_grids, grid_indices_of_trials = _get_grids_and_grid_indices_of_trials(
         param_name, dist, trials, n_steps
     )
-    unique_vals, counts_in_unique = np.unique(grid_indices_of_trials, return_counts=True)
-    counts = np.zeros(n_grids, dtype=np.int32)
-    counts[unique_vals] += counts_in_unique
-    return counts
+    # Avoid generating unique array if grid_indices_of_trials is empty
+    if grid_indices_of_trials.size == 0:
+        return np.zeros(n_grids, dtype=np.int32)
+    # Use bincount if grid indices are in [0, n_grids)
+    # This is faster than np.unique for integer binning
+    if np.amin(grid_indices_of_trials) >= 0 and np.amax(grid_indices_of_trials) < n_grids:
+        counts = np.bincount(grid_indices_of_trials, minlength=n_grids)
+        return counts.astype(np.int32)
+    else:
+        unique_vals, counts_in_unique = np.unique(grid_indices_of_trials, return_counts=True)
+        counts = np.zeros(n_grids, dtype=np.int32)
+        counts[unique_vals] += counts_in_unique
+        return counts
 
 
 def _count_categorical_param_in_grid(
