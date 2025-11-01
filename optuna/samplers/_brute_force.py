@@ -76,9 +76,16 @@ class _TreeNode:
     def count_unexpanded(self, exclude_running: bool) -> int:
         # Count the number of unexpanded nodes in the subtree.
         if self.children is None:
-            return 0 if exclude_running and self.is_running else 1
-        else:
-            return sum(child.count_unexpanded(exclude_running) for child in self.children.values())
+            if exclude_running and self.is_running:
+                return 0
+            return 1
+        # Using a local variable for attribute access outside the loop for faster lookup
+        children_values = self.children.values()
+        # Use sum with a generator expression (no faster way in Python 3.10 for tree recursion)
+        total = 0
+        for child in children_values:
+            total += child.count_unexpanded(exclude_running)
+        return total
 
     def sample_child(self, rng: np.random.RandomState, exclude_running: bool) -> float:
         assert self.children is not None
