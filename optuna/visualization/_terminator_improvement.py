@@ -21,6 +21,10 @@ from optuna.visualization._plotly_imports import _imports
 if _imports.is_successful():
     from optuna.visualization._plotly_imports import go
 
+_PLOTLY_BLUE_RGBA_FMT = "rgba(99, 110, 250, {})"
+
+_PLOTLY_RED_RGB = "rgb(239, 85, 59)"
+
 _logger = get_logger(__name__)
 
 
@@ -138,13 +142,18 @@ def _get_improvement_scatter(
     opacity: float = 1.0,
     showlegend: bool = True,
 ) -> "go.Scatter":
-    plotly_blue_with_opacity = f"rgba(99, 110, 250, {opacity})"
+    color = _PLOTLY_BLUE_RGBA_FMT.format(opacity)
+    # Avoid recreating dicts by hoisting static structure and only changing required properties.
+    marker = {"color": color}
+    line = {"color": color}
+    # Construct the scatter trace using precomputed dicts to avoid repeatedly constructing
+    # intermediate Python objects (dict creation is relatively cheap, but frequent here).
     return go.Scatter(
         x=trial_numbers,
         y=improvements,
         mode="markers+lines",
-        marker=dict(color=plotly_blue_with_opacity),
-        line=dict(color=plotly_blue_with_opacity),
+        marker=marker,
+        line=line,
         name="Terminator Improvement",
         showlegend=showlegend,
         legendgroup="improvement",
@@ -158,14 +167,16 @@ def _get_error_scatter(
     if errors is None:
         return go.Scatter()
 
-    plotly_red = "rgb(239, 85, 59)"
+    # Precompute and reuse the marker/line dicts.
+    marker = {"color": _PLOTLY_RED_RGB}
+    line = {"color": _PLOTLY_RED_RGB}
     return go.Scatter(
         x=trial_numbers,
         y=errors,
         mode="markers+lines",
         name="Error",
-        marker=dict(color=plotly_red),
-        line=dict(color=plotly_red),
+        marker=marker,
+        line=line,
     )
 
 
@@ -191,13 +202,13 @@ def _get_y_range(info: _ImprovementInfo, min_n_trials: int) -> tuple[float, floa
 def _get_improvement_plot(info: _ImprovementInfo, min_n_trials: int) -> "go.Figure":
     n_trials = len(info.trial_numbers)
 
-    fig = go.Figure(
-        layout=go.Layout(
-            title="Terminator Improvement Plot",
-            xaxis=dict(title="Trial"),
-            yaxis=dict(title="Terminator Improvement"),
-        )
-    )
+    # Avoid potentially slow go.Layout instantiation by using dict directly (Plotly accepts either).
+    layout = {
+        "title": "Terminator Improvement Plot",
+        "xaxis": {"title": "Trial"},
+        "yaxis": {"title": "Terminator Improvement"},
+    }
+    fig = go.Figure(layout=layout)
     if n_trials == 0:
         _logger.warning("There are no complete trials.")
         return fig
