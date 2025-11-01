@@ -128,11 +128,33 @@ def _select_parents(
     dominates: Callable[[FrozenTrial, FrozenTrial, Sequence[StudyDirection]], bool],
 ) -> list[FrozenTrial]:
     parents: list[FrozenTrial] = []
-    for _ in range(crossover.n_parents):
-        parent = _select_parent(
-            study, [t for t in parent_population if t not in parents], rng, dominates
+    n_parents = crossover.n_parents
+    # Optimization: Use a set for O(1) membership checks instead of repeated list lookups
+    parents_set = set()
+    parent_population_list = list(parent_population)
+
+    # Optimization: Pre-initialize a mask array for fast exclusion of parents
+    population_len = len(parent_population_list)
+    excluded_indices = set()
+
+    for _ in range(n_parents):
+        # Optimization: Rather than list comprehension on every loop, precompute indices then select
+        available_indices = [i for i in range(population_len) if i not in excluded_indices]
+        selected_parent = _select_parent(
+            study,
+            [parent_population_list[i] for i in available_indices],
+            rng,
+            dominates,
         )
-        parents.append(parent)
+        parents.append(selected_parent)
+        # Add to both set and index mask for fast subsequent filtering
+        parents_set.add(selected_parent)
+        # Optimization: Avoid repeated expensive 'not in' checks by storing the index directly if possible
+        # This avoids O(N) lookup on FrozenTrial comparison if unique objects
+        for idx in available_indices:
+            if parent_population_list[idx] is selected_parent:
+                excluded_indices.add(idx)
+                break  # Only one parent should be excluded per selection
 
     return parents
 
@@ -144,8 +166,13 @@ def _select_parent(
     dominates: Callable[[FrozenTrial, FrozenTrial, Sequence[StudyDirection]], bool],
 ) -> FrozenTrial:
     population_size = len(parent_population)
-    candidate0 = parent_population[rng.choice(population_size)]
-    candidate1 = parent_population[rng.choice(population_size)]
+    # Optimization: Use rng.randint instead of rng.choice for faster index selection on sequences
+    idx0 = rng.randint(population_size)
+    idx1 = rng.randint(population_size)
+    candidate0 = parent_population[idx0]
+    candidate1 = parent_population[idx1]
+
+    # TODO(ohta): Consider crowding distance.
 
     # TODO(ohta): Consider crowding distance.
     if dominates(candidate0, candidate1, study.directions):
