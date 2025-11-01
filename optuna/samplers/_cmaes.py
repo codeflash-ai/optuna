@@ -642,5 +642,8 @@ class CmaEsSampler(BaseSampler):
 def _is_compatible_search_space(
     trans: _SearchSpaceTransform, search_space: dict[str, BaseDistribution]
 ) -> bool:
-    intersection_size = len(set(trans._search_space.keys()).intersection(search_space.keys()))
-    return intersection_size == len(trans._search_space) == len(search_space)
+    trans_keys = trans._search_space.keys()
+    search_keys = search_space.keys()
+    if len(trans_keys) != len(search_keys):
+        return False
+    return trans_keys == search_keys
