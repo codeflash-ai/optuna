@@ -47,11 +47,24 @@ class SPXCrossover(BaseCrossover):
         # Section 2 A Brief Review of SPX
 
         n = self.n_parents - 1
-        G = np.mean(parents_params, axis=0)  # Equation (1).
-        rs = np.power(rng.rand(n), 1 / (np.arange(n) + 1))  # Equation (2).
+        # --- Optimized np.mean using axis sum and division for speed, as n_parents is small and likely 3
+        G = np.sum(parents_params, axis=0) / self.n_parents  # Equation (1).
+
+        # --- Precompute the exponent array outside np.power for speed
+        exp_arr = 1 / (np.arange(n) + 1)
+        rand_vals = rng.rand(n)
+        rs = rand_vals**exp_arr  # Equation (2).
 
         epsilon = np.sqrt(len(search_space_bounds) + 2) if self._epsilon is None else self._epsilon
-        xks = [G + epsilon * (pk - G) for pk in parents_params]  # Equation (3).
+
+        # --- Vectorized xks calculation for speed and reduced intermediate allocations
+        # parents_params shape: (n_parents, n_dimensions)
+        # G shape: (n_dimensions,)
+        # (pk - G): shape (n_parents, n_dimensions)
+        # Broadcasting epsilon is fine, scalar.
+        xks = G + epsilon * (parents_params - G)  # Equation (3).
+
+        # --- Use array instead of loop for accumulation for better memory & efficiency
 
         ck = 0  # Equation (4).
         for k in range(1, self.n_parents):
