@@ -248,13 +248,21 @@ class HyperbandPruner(BasePruner):
             return 0
 
         assert self._n_brackets is not None
-        n = (
-            binascii.crc32("{}_{}".format(study.study_name, trial.number).encode())
-            % self._total_trial_allocation_budget
-        )
-        for bracket_id in range(self._n_brackets):
-            n -= self._trial_allocation_budgets[bracket_id]
-            if n < 0:
+        # Optimize: minimize repeated indexing and per-iteration Python overhead
+        # Precompute the trial_id string outside binascii.crc32, use f-string for speed
+        trial_id = f"{study.study_name}_{trial.number}"
+        n = binascii.crc32(trial_id.encode()) % self._total_trial_allocation_budget
+
+        # Use local variable for the trial_allocation_budgets to speed up attribute access
+        budgets = self._trial_allocation_budgets
+        limit = self._n_brackets
+
+        # Avoid repeated integer subtraction and index lookup using an accumulator pattern
+        # This reduces Python-level per-iteration overhead
+        acc = 0
+        for bracket_id in range(limit):
+            acc += budgets[bracket_id]
+            if n < acc:
                 return bracket_id
 
         assert False, "This line should be unreachable."
