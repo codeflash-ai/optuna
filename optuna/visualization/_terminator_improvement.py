@@ -97,38 +97,50 @@ def _get_improvement_info(
         else:
             error_evaluator = CrossValidationErrorEvaluator()
 
+
+    # Pre-filter completed trials once for much faster access.
+    completed_trials = [trial for trial in study.trials if trial.state == optuna.trial.TrialState.COMPLETE]
+    n_completed = len(completed_trials)
     trial_numbers = []
-    completed_trials = []
     improvements = []
     errors = []
 
-    for trial in tqdm.tqdm(study.trials):
-        if trial.state == optuna.trial.TrialState.COMPLETE:
-            completed_trials.append(trial)
+    if n_completed == 0:
+        return _ImprovementInfo(trial_numbers=[], improvements=[], errors=None)
 
-        if len(completed_trials) == 0:
+    # For each trial index, evaluate improvements/errors up to that point.
+    completed_idx = 0
+    for trial in study.trials:
+        if trial.state == optuna.trial.TrialState.COMPLETE:
+            completed_idx += 1
+
+        if completed_idx == 0:
             continue
 
         trial_numbers.append(trial.number)
 
+
+        # Only need first completed_idx trials for evaluation.
+        eval_trials = completed_trials[:completed_idx]
+
         improvement = improvement_evaluator.evaluate(
-            trials=completed_trials, study_direction=study.direction
+            trials=eval_trials, study_direction=study.direction
         )
         improvements.append(improvement)
 
         if get_error:
             error = error_evaluator.evaluate(
-                trials=completed_trials, study_direction=study.direction
+                trials=eval_trials, study_direction=study.direction
             )
             errors.append(error)
 
-    if len(errors) == 0:
+    if get_error and len(errors) > 0:
         return _ImprovementInfo(
-            trial_numbers=trial_numbers, improvements=improvements, errors=None
+            trial_numbers=trial_numbers, improvements=improvements, errors=errors
         )
     else:
         return _ImprovementInfo(
-            trial_numbers=trial_numbers, improvements=improvements, errors=errors
+            trial_numbers=trial_numbers, improvements=improvements, errors=None
         )
 
 
