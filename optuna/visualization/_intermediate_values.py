@@ -84,19 +84,30 @@ def _get_intermediate_plot(info: _IntermediatePlotInfo) -> "go.Figure":
 
     default_marker = {"maxdisplayed": 10}
 
-    traces = [
-        go.Scatter(
-            x=tuple((x for x, _ in tinfo.sorted_intermediate_values)),
-            y=tuple((y for _, y in tinfo.sorted_intermediate_values)),
-            mode="lines+markers",
-            marker=(
-                default_marker
-                if tinfo.feasible
-                else {**default_marker, "color": "#CCCCCC"}  # type: ignore[dict-item]
-            ),
-            name="Trial{}".format(tinfo.trial_number),
+    # Preallocate list for traces and do tuple conversion directly
+    traces = []
+    # Use local var for constructor and attribute access for speed
+    scatter = go.Scatter
+    append = traces.append
+
+    for tinfo in trial_infos:
+        # Unpack/interleave in a single pass for better perf
+        siv = tinfo.sorted_intermediate_values
+        # If siv is large, avoid double generator and use tuple(zip(*..))
+        if siv:
+            x_vals, y_vals = zip(*siv)
+        else:
+            x_vals = ()
+            y_vals = ()
+        marker = default_marker if tinfo.feasible else {**default_marker, "color": "#CCCCCC"}
+        append(
+            scatter(
+                x=x_vals,
+                y=y_vals,
+                mode="lines+markers",
+                marker=marker,
+                name="Trial{}".format(tinfo.trial_number),
+            )
         )
-        for tinfo in trial_infos
-    ]
 
     return go.Figure(data=traces, layout=layout)
