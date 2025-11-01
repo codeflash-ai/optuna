@@ -616,8 +616,10 @@ def distribution_to_json(dist: BaseDistribution) -> str:
         A JSON string of a given distribution.
 
     """
-
-    return json.dumps({"name": dist.__class__.__name__, "attributes": dist._asdict()})
+    # Avoid intermediate dict, generate all attributes and name in single final dict
+    d = dist._asdict()
+    c_name = dist.__class__.__name__
+    return json.dumps({"name": c_name, "attributes": d})
 
 
 def check_distribution_compatibility(

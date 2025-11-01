@@ -236,6 +236,26 @@ class JournalStorage(BaseStorage):
 
         if template_trial:
             log["state"] = template_trial.state
+
+            # Preallocate dicts for distributions and params in a single pass
+            distributions_dict = {}
+            params_dict = {}
+
+            dist_items = template_trial.distributions.items()
+            param_items = template_trial.params.items()
+
+            # Map param names to dists from distributions dict once
+            # This avoids repeated lookups and allows simultaneous build
+            # Build distributions first, then map param values with internal repr
+            for k, dist in dist_items:
+                distributions_dict[k] = distribution_to_json(dist)
+
+            for k, param in param_items:
+                params_dict[k] = template_trial.distributions[k].to_internal_repr(param)
+
+            log["distributions"] = distributions_dict
+            log["params"] = params_dict
+
             if template_trial.values is not None and len(template_trial.values) > 1:
                 log["value"] = None
                 log["values"] = template_trial.values
@@ -252,14 +272,6 @@ class JournalStorage(BaseStorage):
                 log["datetime_complete"] = template_trial.datetime_complete.isoformat(
                     timespec="microseconds"
                 )
-
-            log["distributions"] = {
-                k: distribution_to_json(dist) for k, dist in template_trial.distributions.items()
-            }
-            log["params"] = {
-                k: template_trial.distributions[k].to_internal_repr(param)
-                for k, param in template_trial.params.items()
-            }
             log["user_attrs"] = template_trial.user_attrs
             log["system_attrs"] = template_trial.system_attrs
             log["intermediate_values"] = template_trial.intermediate_values
