@@ -107,7 +107,7 @@ def _log_ndtr(a: np.ndarray) -> np.ndarray:
 
 
 def _norm_logpdf(x: np.ndarray) -> np.ndarray:
-    return -(x**2) / 2.0 - _norm_pdf_logC
+    return -np.square(x) * 0.5 - _norm_pdf_logC
 
 
 def _log_gauss_mass(a: np.ndarray, b: np.ndarray) -> np.ndarray:
