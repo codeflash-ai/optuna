@@ -119,33 +119,32 @@ def _log_gauss_mass(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     case_right = a > 0
     case_central = ~(case_left | case_right)
 
-    def mass_case_left(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        return _log_diff(_log_ndtr(b), _log_ndtr(a))
+    def _log_diff(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            result = x + np.log1p(-np.exp(y - x))
+        return result
 
-    def mass_case_right(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        return mass_case_left(-b, -a)
+    def _log_ndtr(x: np.ndarray) -> np.ndarray:
+        from scipy.stats import norm
 
-    def mass_case_central(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        # Previously, this was implemented as:
-        # left_mass = mass_case_left(a, 0)
-        # right_mass = mass_case_right(0, b)
-        # return _log_sum(left_mass, right_mass)
-        # Catastrophic cancellation occurs as np.exp(log_mass) approaches 1.
-        # Correct for this with an alternative formulation.
-        # We're not concerned with underflow here: if only one term
-        # underflows, it was insignificant; if both terms underflow,
-        # the result can't accurately be represented in logspace anyway
-        # because sc.log1p(x) ~ x for small x.
-        return np.log1p(-_ndtr(a) - _ndtr(-b))
+        return norm.logcdf(x)
+
+    def _ndtr(x: np.ndarray) -> np.ndarray:
+        from scipy.stats import norm
+
+        return norm.cdf(x)
 
     # _lazyselect not working; don't care to debug it
     out = np.full_like(a, fill_value=np.nan, dtype=np.complex128)
-    if (a_left := a[case_left]).size:
-        out[case_left] = mass_case_left(a_left, b[case_left])
-    if (a_right := a[case_right]).size:
-        out[case_right] = mass_case_right(a_right, b[case_right])
-    if (a_central := a[case_central]).size:
-        out[case_central] = mass_case_central(a_central, b[case_central])
+    idx_left = np.where(case_left)[0]
+    if idx_left.size:
+        out[idx_left] = _log_diff(_log_ndtr(b[idx_left]), _log_ndtr(a[idx_left]))
+    idx_right = np.where(case_right)[0]
+    if idx_right.size:
+        out[idx_right] = _log_diff(_log_ndtr(-a[idx_right]), _log_ndtr(-b[idx_right]))
+    idx_central = np.where(case_central)[0]
+    if idx_central.size:
+        out[idx_central] = np.log1p(-_ndtr(a[idx_central]) - _ndtr(-b[idx_central]))
     return np.real(out)  # discard ~0j
 
 
