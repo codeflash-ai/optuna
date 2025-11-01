@@ -1054,8 +1054,7 @@ class _VersionManager:
         self.url = url
         self.engine = engine
         self.scoped_session = scoped_session
-        self._init_version_info_model()
-        self._init_alembic()
+        self._initialized = False
 
     def _init_version_info_model(self) -> None:
         with _create_scoped_session(self.scoped_session, True) as session:
@@ -1171,8 +1170,12 @@ class _VersionManager:
             return version_info.schema_version == models.SCHEMA_VERSION
 
     def _create_alembic_script(self) -> "alembic_script.ScriptDirectory":
+        self._ensure_initialized()
         config = self._create_alembic_config()
-        script = alembic_script.ScriptDirectory.from_config(config)
+        script = getattr(self, '_script_directory', None)
+        if script is None:
+            script = alembic_script.ScriptDirectory.from_config(config)
+            self._script_directory = script
         return script
 
     def _create_alembic_config(self) -> "alembic_config.Config":
@@ -1182,6 +1185,12 @@ class _VersionManager:
         config.set_main_option("script_location", escape_alembic_config_value(alembic_dir))
         config.set_main_option("sqlalchemy.url", escape_alembic_config_value(self.url))
         return config
+
+    def _ensure_initialized(self) -> None:
+        if not self._initialized:
+            self._init_version_info_model()
+            self._init_alembic()
+            self._initialized = True
 
 
 def escape_alembic_config_value(value: str) -> str:
