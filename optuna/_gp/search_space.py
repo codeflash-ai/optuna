@@ -117,11 +117,10 @@ def _unnormalize_one_param(
         return param_value
     low, high = (bounds[0] - 0.5 * step, bounds[1] + 0.5 * step)
     if scale_type == _ScaleType.LOG:
-        low, high = (math.log(low), math.log(high))
-    param_value = param_value * (high - low) + low
-    if scale_type == _ScaleType.LOG:
-        param_value = np.exp(param_value)
-    return param_value
+        low, high = np.log(low), np.log(high)
+        param_value = param_value * (high - low) + low
+        return np.exp(param_value)
+    return param_value * (high - low) + low
 
 
 def _normalize_one_param(
