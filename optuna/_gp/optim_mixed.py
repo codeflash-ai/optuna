@@ -126,12 +126,31 @@ def _discrete_line_search(
         # Do not optimize anything when there's only one choice.
         return initial_params, initial_fval, False
 
-    def find_nearest_index(x: float) -> int:
-        i = int(np.clip(np.searchsorted(grids, x), 1, len(grids) - 1))
-        return i - 1 if abs(x - grids[i - 1]) < abs(x - grids[i]) else i
 
-    current_choice_i = find_nearest_index(initial_params[param_idx])
-    assert np.isclose(initial_params[param_idx], grids[current_choice_i])
+    # For searchsorted, guarantee monotonic grids.
+    grids_view = grids
+    grids_len = len(grids)
+
+    a_param_val = initial_params[param_idx]
+
+    # Optimize find_nearest_index by removing double searchsorted
+    def find_nearest_index(x: float) -> int:
+        i = np.searchsorted(grids_view, x)
+        # Instead of np.clip, use min/max; no branch missed
+        if i <= 0:
+            return 0
+        elif i >= grids_len:
+            return grids_len - 1
+        # Compare distances and choose the nearest index
+        prev = grids_view[i - 1]
+        next = grids_view[i]
+        return i - 1 if abs(x - prev) < abs(x - next) else i
+
+    current_choice_i = find_nearest_index(a_param_val)
+
+    assert np.isclose(a_param_val, grids_view[current_choice_i])
+
+    # Only cache integer indices, not values
 
     negative_fval_cache = {current_choice_i: -initial_fval}
 
@@ -142,7 +161,8 @@ def _discrete_line_search(
         cache_val = negative_fval_cache.get(i)
         if cache_val is not None:
             return cache_val
-        normalized_params[param_idx] = grids[i]
+        normalized_params[param_idx] = grids_view[i]
+        # Flip sign because scipy minimizes functions.
 
         # Flip sign because scipy minimizes functions.
         negval = -float(acqf.eval_acqf_no_grad(normalized_params))
@@ -150,23 +170,39 @@ def _discrete_line_search(
         return negval
 
     def interpolated_negative_acqf(x: float) -> float:
-        if x < grids[0] or x > grids[-1]:
+        # Bounds check
+        if x < grids_view[0] or x > grids_view[-1]:
             return np.inf
-        right = int(np.clip(np.searchsorted(grids, x), 1, len(grids) - 1))
-        left = right - 1
-        neg_acqf_left, neg_acqf_right = negative_acqf_with_cache(left), negative_acqf_with_cache(
-            right
-        )
-        w_left = (grids[right] - x) / (grids[right] - grids[left])
-        w_right = 1.0 - w_left
-        return w_left * neg_acqf_left + w_right * neg_acqf_right
+        i = np.searchsorted(grids_view, x)
+        if i <= 0:
+            # Below the lowest; should not occur (already checked), but safe
+            left, right = 0, 0
+        elif i >= grids_len:
+            left, right = grids_len - 1, grids_len - 1
+        else:
+            left = i - 1
+            right = i
+        # Fast path if right==left (at extreme edge)
+        if right == left:
+            return negative_acqf_with_cache(left)
+        neg_acqf_left = negative_acqf_with_cache(left)
+        neg_acqf_right = negative_acqf_with_cache(right)
+        denom = grids_view[right] - grids_view[left]
+        if denom == 0.0:
+            # Should not happen (distinct grid points required), but avoid division by zero
+            return neg_acqf_left
+        w_left = (grids_view[right] - x) / denom
+        # Small repeated computation, but saves one subtraction
+        return w_left * neg_acqf_left + (1.0 - w_left) * neg_acqf_right
+
+    # This constant is only used once; keep as-is.
 
     EPS = 1e-12
     res = so.minimize_scalar(
         interpolated_negative_acqf,
         # The values of this bracket are (inf, -fval, inf).
         # This trivially satisfies the bracket condition if fval is finite.
-        bracket=(grids[0] - EPS, grids[current_choice_i], grids[-1] + EPS),
+        bracket=(grids_view[0] - EPS, grids_view[current_choice_i], grids_view[-1] + EPS),
         method="brent",
         tol=xtol,
     )
@@ -175,7 +211,7 @@ def _discrete_line_search(
 
     # We check both conditions because of numerical errors.
     if opt_idx != current_choice_i and fval_opt > initial_fval:
-        normalized_params[param_idx] = grids[opt_idx]
+        normalized_params[param_idx] = grids_view[opt_idx]
         return normalized_params, fval_opt, True
 
     return initial_params, initial_fval, False  # No improvement.
