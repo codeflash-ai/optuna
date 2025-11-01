@@ -195,23 +195,22 @@ def _associate_individuals_with_reference_points(
     # In addition, the minimum distance from each reference point can be replaced with maximum
     # inner product between the given individual and each normalized reference points.
 
-    # distance_from_reference_lines is a ndarray of shape (n, p), where n is the size of the
-    # population and p is the number of reference points. Its (i,j) entry keeps distance between
-    # the i-th individual values and the j-th reference line.
-    reference_point_norm_squared = np.linalg.norm(reference_points, axis=1) ** 2
-    perpendicular_vectors_to_reference_lines = np.einsum(
-        "ni,pi,p,pm->npm",
-        objective_matrix,
-        reference_points,
-        1 / reference_point_norm_squared,
-        reference_points,
-    )
-    distance_from_reference_lines = np.linalg.norm(
-        objective_matrix[:, np.newaxis, :] - perpendicular_vectors_to_reference_lines,
-        axis=2,
-    )
-    closest_reference_points: np.ndarray = np.argmin(distance_from_reference_lines, axis=1)
-    distance_reference_points: np.ndarray = np.min(distance_from_reference_lines, axis=1)
+    # Optimize norm computation by eliminating unnecessary full projections:
+    # Project each individual onto each reference point (lines through origin).
+    # The closest distance from a point `a` to a line through origin in direction `b` is:
+    # ||a - proj_b(a)|| = sqrt(||a||^2 - (a.b)^2 / ||b||^2)
+    # (Assuming both are normalized, but handle norms in code).
+    b_norm2 = np.sum(reference_points ** 2, axis=1)  # shape (p,)
+    a_dot_b = objective_matrix @ reference_points.T   # shape (n, p)
+    proj_norm2 = (a_dot_b ** 2) / b_norm2            # shape (n, p)
+    a_norm2 = np.sum(objective_matrix ** 2, axis=1, keepdims=True)  # shape (n, 1)
+
+    # Squared distances from each point to each reference line
+    sq_dist = np.maximum(a_norm2 - proj_norm2, 0.0)  # no negative due to float precision
+
+    # Closest reference: min squared distance index, and the corresponding distance
+    closest_reference_points = np.argmin(sq_dist, axis=1)
+    distance_reference_points = np.sqrt(np.min(sq_dist, axis=1))
 
     return closest_reference_points, distance_reference_points
 
