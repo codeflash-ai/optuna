@@ -12,6 +12,7 @@ from optuna.search_space import intersection_search_space
 from optuna.study import StudyDirection
 from optuna.trial import FrozenTrial
 from optuna.trial import TrialState
+from optuna._imports import _LazyImport
 
 
 if TYPE_CHECKING:
@@ -212,27 +213,46 @@ class BestValueStagnationEvaluator(BaseImprovementEvaluator):
         self._max_stagnation_trials = max_stagnation_trials
 
     def evaluate(self, trials: list[FrozenTrial], study_direction: StudyDirection) -> float:
-        self._validate_input(trials)
-        is_maximize_direction = True if (study_direction == StudyDirection.MAXIMIZE) else False
-        trials = [t for t in trials if t.state == TrialState.COMPLETE]
-        current_step = len(trials) - 1
+        # Optimize trial filtering by reducing repeated scans of the list and avoid unnecessary list allocations.
+        filtered_trials = []
+        for t in trials:
+            if t.state == TrialState.COMPLETE:
+                filtered_trials.append(t)
+
+        self._validate_input_with_list(filtered_trials)
+        is_maximize_direction = study_direction == StudyDirection.MAXIMIZE
+        current_step = len(filtered_trials) - 1
+
+        # Single-pass: Remove repeated access to trials[best_step].value
 
         best_step = 0
-        for i, trial in enumerate(trials):
-            best_value = trials[best_step].value
+        best_value = filtered_trials[0].value
+        assert best_value is not None
+        for i, trial in enumerate(filtered_trials):
             current_value = trial.value
-            assert best_value is not None
             assert current_value is not None
-            if is_maximize_direction and (best_value < current_value):
-                best_step = i
-            elif (not is_maximize_direction) and (best_value > current_value):
-                best_step = i
+            if is_maximize_direction:
+                if best_value < current_value:
+                    best_step = i
+                    best_value = current_value
+            else:
+                if best_value > current_value:
+                    best_step = i
+                    best_value = current_value
 
         return self._max_stagnation_trials - (current_step - best_step)
 
     @classmethod
     def _validate_input(cls, trials: list[FrozenTrial]) -> None:
         if len([t for t in trials if t.state == TrialState.COMPLETE]) == 0:
+            raise ValueError(
+                "Because no trial has been completed yet, the improvement cannot be evaluated."
+            )
+
+    # Helper for optimized input checking after filtering for completed state
+    @staticmethod
+    def _validate_input_with_list(trials: list[FrozenTrial]) -> None:
+        if not trials:
             raise ValueError(
                 "Because no trial has been completed yet, the improvement cannot be evaluated."
             )
