@@ -16,6 +16,7 @@ from optuna.logging import get_logger
 from optuna.study import Study
 from optuna.study import StudyDirection
 from optuna.trial import FrozenTrial
+from itertools import compress
 
 
 _logger = get_logger(__name__)
@@ -40,7 +41,16 @@ class _QuantileFilter:
     def filter(self, trials: list[FrozenTrial]) -> list[FrozenTrial]:
         target, min_n_top_trials = self._target, self._min_n_top_trials
         sign = 1.0 if self._is_lower_better else -1.0
-        loss_values = sign * np.asarray([t.value if target is None else target(t) for t in trials])
+
+        if target is None:
+            loss_values = sign * np.fromiter(
+                (t.value for t in trials), dtype=float, count=len(trials)
+            )
+        else:
+            loss_values = sign * np.fromiter(
+                (target(t) for t in trials), dtype=float, count=len(trials)
+            )
+
         err_msg = "len(trials) must be larger than or equal to min_n_top_trials"
         assert min_n_top_trials <= loss_values.size, err_msg
 
@@ -55,7 +65,7 @@ class _QuantileFilter:
             _quantile(loss_values, self._quantile),
         )
         should_keep_trials = loss_values <= cutoff_val
-        return [t for t, should_keep in zip(trials, should_keep_trials) if should_keep]
+        return list(compress(trials, should_keep_trials))
 
 
 @experimental_class("3.6.0")
