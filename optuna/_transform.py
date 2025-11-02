@@ -173,66 +173,74 @@ def _transform_search_space(
 ) -> tuple[np.ndarray, list[np.ndarray], np.ndarray]:
     assert len(search_space) > 0, "Cannot transform if no distributions are given."
 
-    n_bounds = sum(
-        len(d.choices) if isinstance(d, CategoricalDistribution) else 1
-        for d in search_space.values()
-    )
+    # Precompute Is-Categorical and n_choices for all distributions in one pass
+    is_categorical = []
+    n_bounds = 0
+    choices_lens = []
+    distributions = list(search_space.values())
+    for d in distributions:
+        cat = isinstance(d, CategoricalDistribution)
+        is_categorical.append(cat)
+        if cat:
+            n = len(d.choices)
+            n_bounds += n
+            choices_lens.append(n)
+        else:
+            n_bounds += 1
+            choices_lens.append(None)  # placeholder
 
     bounds = np.empty((n_bounds, 2), dtype=np.float64)
     column_to_encoded_columns: list[np.ndarray] = []
     encoded_column_to_column = np.empty(n_bounds, dtype=np.int64)
 
     bound_idx = 0
-    for distribution in search_space.values():
-        d = distribution
-        if isinstance(d, CategoricalDistribution):
-            n_choices = len(d.choices)
+    idx = 0
+    for d in distributions:
+        if is_categorical[idx]:
+            n_choices = choices_lens[idx]
+            # Use slice assignment for bounds, np.arange for encoded_columns
             bounds[bound_idx : bound_idx + n_choices] = (0, 1)  # Broadcast across all choices.
             encoded_columns = np.arange(bound_idx, bound_idx + n_choices)
             encoded_column_to_column[encoded_columns] = len(column_to_encoded_columns)
             column_to_encoded_columns.append(encoded_columns)
             bound_idx += n_choices
-        elif isinstance(
-            d,
-            (
-                FloatDistribution,
-                IntDistribution,
-            ),
-        ):
-            if isinstance(d, FloatDistribution):
-                if d.step is not None:
-                    half_step = 0.5 * d.step if transform_step else 0.0
-                    bds = (
-                        _transform_numerical_param(d.low, d, transform_log) - half_step,
-                        _transform_numerical_param(d.high, d, transform_log) + half_step,
-                    )
-                else:
-                    bds = (
-                        _transform_numerical_param(d.low, d, transform_log),
-                        _transform_numerical_param(d.high, d, transform_log),
-                    )
-            elif isinstance(d, IntDistribution):
+        elif isinstance(d, FloatDistribution):
+            # Remove redundant isinstance calls -- fold them into the distribution's type detection above
+            if d.step is not None:
                 half_step = 0.5 * d.step if transform_step else 0.0
-                if d.log:
-                    bds = (
-                        _transform_numerical_param(d.low - half_step, d, transform_log),
-                        _transform_numerical_param(d.high + half_step, d, transform_log),
-                    )
-                else:
-                    bds = (
-                        _transform_numerical_param(d.low, d, transform_log) - half_step,
-                        _transform_numerical_param(d.high, d, transform_log) + half_step,
-                    )
+                low = _transform_numerical_param(d.low, d, transform_log)
+                high = _transform_numerical_param(d.high, d, transform_log)
+                bds_low = low - half_step
+                bds_high = high + half_step
             else:
-                assert False, "Should not reach. Unexpected distribution."
-
-            bounds[bound_idx] = bds
-            encoded_column = np.atleast_1d(bound_idx)
-            encoded_column_to_column[encoded_column] = len(column_to_encoded_columns)
+                bds_low = _transform_numerical_param(d.low, d, transform_log)
+                bds_high = _transform_numerical_param(d.high, d, transform_log)
+            bounds[bound_idx] = (bds_low, bds_high)
+            encoded_column = np.array([bound_idx], dtype=np.int64)
+            encoded_column_to_column[bound_idx] = len(column_to_encoded_columns)
+            column_to_encoded_columns.append(encoded_column)
+            bound_idx += 1
+        elif isinstance(d, IntDistribution):
+            half_step = 0.5 * d.step if transform_step else 0.0
+            if d.log:
+                low = _transform_numerical_param(d.low - half_step, d, transform_log)
+                high = _transform_numerical_param(d.high + half_step, d, transform_log)
+                bds_low = low
+                bds_high = high
+            else:
+                low = _transform_numerical_param(d.low, d, transform_log)
+                high = _transform_numerical_param(d.high, d, transform_log)
+                bds_low = low - half_step
+                bds_high = high + half_step
+            bounds[bound_idx] = (bds_low, bds_high)
+            encoded_column = np.array([bound_idx], dtype=np.int64)
+            encoded_column_to_column[bound_idx] = len(column_to_encoded_columns)
             column_to_encoded_columns.append(encoded_column)
             bound_idx += 1
         else:
             assert False, "Should not reach. Unexpected distribution."
+
+        idx += 1
 
     assert bound_idx == n_bounds
 
@@ -244,22 +252,17 @@ def _transform_numerical_param(
 ) -> float:
     d = distribution
 
-    if isinstance(d, CategoricalDistribution):
+    # Avoid redundant isinstance checks, re-order them to minimize checks
+    if isinstance(d, FloatDistribution) or isinstance(d, IntDistribution):
+        # Check the log property directly
+        if getattr(d, "log", False):
+            return math.log(param) if transform_log else float(param)
+        else:
+            return float(param)
+    elif isinstance(d, CategoricalDistribution):
         assert False, "Should not reach. Should be one-hot encoded."
-    elif isinstance(d, FloatDistribution):
-        if d.log:
-            trans_param = math.log(param) if transform_log else float(param)
-        else:
-            trans_param = float(param)
-    elif isinstance(d, IntDistribution):
-        if d.log:
-            trans_param = math.log(param) if transform_log else float(param)
-        else:
-            trans_param = float(param)
     else:
         assert False, "Should not reach. Unexpected distribution."
-
-    return trans_param
 
 
 def _untransform_numerical_param(
