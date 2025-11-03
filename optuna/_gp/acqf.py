@@ -23,10 +23,10 @@ else:
     torch = _LazyImport("torch")
 
 
-_SQRT_HALF = math.sqrt(0.5)
-_INV_SQRT_2PI = 1 / math.sqrt(2 * math.pi)
-_SQRT_HALF_PI = math.sqrt(0.5 * math.pi)
-_LOG_SQRT_2PI = math.log(math.sqrt(2 * math.pi))
+_SQRT_HALF = 0.7071067811865476
+_INV_SQRT_2PI = 0.3989422804014327
+_SQRT_HALF_PI = 1.2533141373155001
+_LOG_SQRT_2PI = 0.9189385332046727
 _EPS = 1e-12  # NOTE(nabenabe): grad becomes nan when EPS=0.
 
 
@@ -73,17 +73,25 @@ def standard_logei(z: torch.Tensor) -> torch.Tensor:
     """
     # First condition (most z falls into this condition, so we calculate it first)
     # NOTE: ei(z) = z * cdf(z) + pdf(z)
-    out = (
-        (z_half := 0.5 * z) * torch.special.erfc(-_SQRT_HALF * z)  # z * cdf(z)
-        + (-z_half * z).exp() * _INV_SQRT_2PI  # pdf(z)
-    ).log()
-    if (z_small := z[(small := z < -25)]).numel():
-        # Second condition (does not happen often, so we calculate it only if necessary)
-        out[small] = (
+    z_half = 0.5 * z
+    # Save intermediate for reuse
+    erfc_neg_sqhalf_z = torch.special.erfc(-_SQRT_HALF * z)
+    exp_term = (-z_half * z).exp()
+    # The computation below avoids recomputation inside the conditional write
+    out = (z_half * erfc_neg_sqhalf_z + exp_term * _INV_SQRT_2PI).log()
+
+    small = z < -25
+    if torch.any(small):
+        z_small = z[small]
+        erfcx_neg_sqhalf_z_small = torch.special.erfcx(-_SQRT_HALF * z_small)
+        # Save intermediate for reuse and numerical stability
+        second_cond = (
             -0.5 * z_small**2
             - _LOG_SQRT_2PI
-            + (1 + _SQRT_HALF_PI * z_small * torch.special.erfcx(-_SQRT_HALF * z_small)).log()
+            + (1 + _SQRT_HALF_PI * z_small * erfcx_neg_sqhalf_z_small).log()
         )
+        out = out.clone() if out._is_view() else out  # safety, avoid possible shared storage
+        out[small] = second_cond
     return out
 
 
