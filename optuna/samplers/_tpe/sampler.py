@@ -51,7 +51,11 @@ _SYSTEM_ATTR_MAX_LENGTH = 2045
 
 
 def default_gamma(x: int) -> int:
-    return min(math.ceil(0.1 * x), 25)
+    # Avoids multiplying and calling math.ceil if result will exceed 25
+    gamma = 0.1 * x
+    if gamma >= 25:
+        return 25
+    return math.ceil(gamma)
 
 
 def hyperopt_default_gamma(x: int) -> int:
