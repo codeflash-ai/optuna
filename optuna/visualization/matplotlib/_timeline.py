@@ -90,8 +90,9 @@ def _get_timeline_plot(info: _TimelineInfo) -> "Axes":
     # There are 5 types of TrialState in total.
     # However, the legend depicts only types present in the arguments.
     legend_handles = []
+    present_state_names = set(_get_state_name(b) for b in info.bars)
     for state_name, color in _cm.items():
-        if any(_get_state_name(b) == state_name for b in info.bars):
+        if state_name in present_state_names:
             legend_handles.append(matplotlib.patches.Patch(color=color, label=state_name))
     ax.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(1.05, 1.0))
     fig.tight_layout()
