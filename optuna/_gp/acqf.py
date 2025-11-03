@@ -47,7 +47,7 @@ def logehvi(
     non_dominated_box_lower_bounds: torch.Tensor,  # (n_boxes, n_objectives)
     non_dominated_box_intervals: torch.Tensor,  # (n_boxes, n_objectives)
 ) -> torch.Tensor:  # (..., )
-    log_n_qmc_samples = float(np.log(Y_post.shape[-2]))
+    log_n_qmc_samples = torch.log(torch.as_tensor(Y_post.shape[-2], dtype=Y_post.dtype, device=Y_post.device))
     # This function calculates Eq. (1) of https://arxiv.org/abs/2006.05078.
     # TODO(nabenabe): Adapt to Eq. (3) when we support batch optimization.
     # TODO(nabenabe): Make the calculation here more numerically stable.
@@ -55,8 +55,9 @@ def logehvi(
     # Check the implementations here:
     # https://github.com/pytorch/botorch/blob/v0.13.0/botorch/utils/safe_math.py
     # https://github.com/pytorch/botorch/blob/v0.13.0/botorch/acquisition/multi_objective/logei.py#L146-L266
+    eps_tensor = torch.tensor(_EPS, dtype=Y_post.dtype, device=Y_post.device)
     diff = Y_post.unsqueeze(-2) - non_dominated_box_lower_bounds
-    diff.clamp_(min=torch.tensor(_EPS, dtype=torch.float64), max=non_dominated_box_intervals)
+    diff.clamp_(min=eps_tensor, max=non_dominated_box_intervals)
     # NOTE(nabenabe): logsumexp with dim=-1 is for the HVI calculation and that with dim=-2 is for
     # expectation of the HVIs over the fixed_samples.
     return torch.special.logsumexp(diff.log().sum(dim=-1), dim=(-2, -1)) - log_n_qmc_samples
