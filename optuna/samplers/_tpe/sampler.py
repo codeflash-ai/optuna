@@ -60,13 +60,23 @@ def hyperopt_default_gamma(x: int) -> int:
 
 def default_weights(x: int) -> np.ndarray:
     if x == 0:
-        return np.asarray([])
+        # Return an empty float array directly (avoids numpy overhead for asarray)
+        return np.empty(0)
     elif x < 25:
-        return np.ones(x)
+        # Preallocate and fill using broadcasting for small arrays
+        out = np.empty(x)
+        out.fill(1.0)
+        return out
     else:
-        ramp = np.linspace(1.0 / x, 1.0, num=x - 25)
-        flat = np.ones(25)
-        return np.concatenate([ramp, flat], axis=0)
+        # For x >= 25, optimize by allocating a single output array
+        out = np.empty(x)
+        n_ramp = x - 25
+        # Use numpy.arange for faster ramp calculation
+        if n_ramp > 0:
+            out[:n_ramp] = np.arange(1.0 / x, 1.0 + 1e-12, (1.0 - 1.0 / x) / (n_ramp - 1)) if n_ramp > 1 else np.array([1.0 / x])
+        # Fill the flat part using broadcasting
+        out[n_ramp:] = 1.0
+        return out
 
 
 class TPESampler(BaseSampler):
