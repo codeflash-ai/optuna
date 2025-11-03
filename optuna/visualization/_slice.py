@@ -75,14 +75,29 @@ def _get_slice_subplot_info(
         constraints=[],
     )
 
+    x_append = plot_info.x.append
+    y_append = plot_info.y.append
+    trial_numbers_append = plot_info.trial_numbers.append
+    constraints_append = plot_info.constraints.append
+
     for t in trials:
-        if param not in t.params:
+        param_value = t.params.get(param, None)
+        if param_value is None:
             continue
-        plot_info.x.append(t.params[param])
-        plot_info.y.append(target(t))
-        plot_info.trial_numbers.append(t.number)
+        x_append(param_value)
+        y_append(target(t))
+        trial_numbers_append(t.number)
         constraints = t.system_attrs.get(_CONSTRAINTS_KEY)
-        plot_info.constraints.append(constraints is None or all([x <= 0.0 for x in constraints]))
+        # Avoid intermediate list creation for all([...])
+        if constraints is None or not constraints:
+            is_feasible = True
+        else:
+            is_feasible = True
+            for x in constraints:
+                if x > 0.0:
+                    is_feasible = False
+                    break
+        constraints_append(is_feasible)
 
     return plot_info
 
