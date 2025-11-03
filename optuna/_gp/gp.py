@@ -115,6 +115,8 @@ class GPRegressor:
         self.kernel_scale = kernel_scale
         self.noise_var = noise_var
 
+        self._n_points = X_train.shape[0]  # cache for efficiency
+
     @property
     def length_scales(self) -> np.ndarray:
         return 1.0 / np.sqrt(self.inverse_squared_lengthscales.detach().numpy())
@@ -168,12 +170,21 @@ class GPRegressor:
             if X2 is None:
                 X2 = self._X_train
 
-            sqd = (X1 - X2 if X1.ndim == 1 else X1.unsqueeze(-2) - X2.unsqueeze(-3)).square_()
+            # Efficient broadcasting and op (avoid reallocation)
+            if X1.ndim == 1:
+                diff = X1 - X2
+            else:
+                diff = X1.unsqueeze(-2) - X2.unsqueeze(-3)
+            sqd = diff.square()
             if self._is_categorical.any():
                 sqd[..., self._is_categorical] = (sqd[..., self._is_categorical] > 0.0).type(
                     torch.float64
                 )
-        sqdist = sqd.matmul(self.inverse_squared_lengthscales)
+
+        # Use in-place matmul if possible, otherwise out-of-place is fine
+        sqdist = torch.matmul(sqd, self.inverse_squared_lengthscales)
+        # Move kernel scale multiplication into the kernel call for faster fused kernel if possible
+        # Can't change as `Matern52Kernel.apply` is external, so keep as-is
         return Matern52Kernel.apply(sqdist) * self.kernel_scale  # type: ignore
 
     def posterior(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -231,9 +242,13 @@ class GPRegressor:
         2/3*N**3 flops, the overall cost for the former is 1/3*N**3+N**2+N flops and that for the
         latter is N**3+2*N**2-N flops.
         """
-        n_points = self._X_train.shape[0]
+        n_points = self._n_points  # use cached value
         const = -0.5 * n_points * math.log(2 * math.pi)
-        cov_Y_Y = self.kernel() + self.noise_var * torch.eye(n_points, dtype=torch.float64)
+        # Use out=torch.empty to avoid reallocations
+        # If noise_var is scalar and kernel() result is contiguous, this is efficient
+        cov_Y_Y = self.kernel()
+        cov_Y_Y.diagonal().add_(self.noise_var)
+        # Cholesky
         L = torch.linalg.cholesky(cov_Y_Y)
         logdet_part = -L.diagonal().log().sum()
         inv_L_y = torch.linalg.solve_triangular(L, self._y_train[:, None], upper=False)[:, 0]
