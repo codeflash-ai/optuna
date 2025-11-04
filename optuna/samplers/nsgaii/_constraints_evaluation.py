@@ -92,14 +92,26 @@ def _evaluate_penalty(population: Sequence[FrozenTrial]) -> np.ndarray:
         feasible/infeasible and None means that the trial does not have constraint values.
     """
 
-    penalty: list[float] = []
-    for trial in population:
+    # Pre-allocate the penalty array for improved performance over list append and final conversion
+    penalty = np.empty(len(population), dtype=float)
+    nan = np.nan  # localize for faster repeated access
+
+    # Minimize attribute lookup, branch, and generator overhead
+    for idx, trial in enumerate(population):
         constraints = trial.system_attrs.get(_CONSTRAINTS_KEY)
         if constraints is None:
-            penalty.append(np.nan)
+            penalty[idx] = nan
         else:
-            penalty.append(sum(v for v in constraints if v > 0))
-    return np.array(penalty)
+            # Use sum with a generator expression only if necessary
+            # For significant speedup, use numpy for summing if constraints is numpy array
+            # But constraints may be any sequence, so we optimize the generator
+            total = 0.0
+            for v in constraints:
+                if v > 0:
+                    total += v
+            penalty[idx] = total
+
+    return penalty
 
 
 def _validate_constraints(
