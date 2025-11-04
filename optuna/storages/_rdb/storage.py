@@ -791,10 +791,9 @@ class RDBStorage(BaseStorage, BaseHeartbeat):
 
     def get_trial(self, trial_id: int) -> FrozenTrial:
         with _create_scoped_session(self.scoped_session) as session:
-            trial_model = models.TrialModel.find_or_raise_by_id(trial_id, session)
-            frozen_trial = self._build_frozen_trial_from_trial_model(trial_model)
-
-        return frozen_trial
+            return self._build_frozen_trial_from_trial_model(
+                models.TrialModel.find_or_raise_by_id(trial_id, session)
+            )
 
     def get_all_trials(
         self,

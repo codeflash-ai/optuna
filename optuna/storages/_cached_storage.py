@@ -196,9 +196,10 @@ class _CachedStorage(BaseStorage, BaseHeartbeat):
         self._backend.set_trial_system_attr(trial_id, key=key, value=value)
 
     def _get_cached_trial(self, trial_id: int) -> FrozenTrial | None:
-        if trial_id not in self._trial_id_to_study_id_and_number:
+        result = self._trial_id_to_study_id_and_number.get(trial_id)
+        if result is None:
             return None
-        study_id, number = self._trial_id_to_study_id_and_number[trial_id]
+        study_id, number = result
         study = self._studies[study_id]
         trial = study.trials[number]
         if not trial.state.is_finished():
@@ -206,10 +207,14 @@ class _CachedStorage(BaseStorage, BaseHeartbeat):
         return trial
 
     def get_trial(self, trial_id: int) -> FrozenTrial:
-        with self._lock:
-            trial = self._get_cached_trial(trial_id)
-            if trial is not None:
-                return trial
+        # Avoid locking unless there is a chance of cache hit
+        # This reduces lock contention in case of backend lookup
+        if self._trial_id_to_study_id_and_number.get(trial_id) is not None:
+            with self._lock:
+                trial = self._get_cached_trial(trial_id)
+                if trial is not None:
+                    return trial
+
 
         return self._backend.get_trial(trial_id)
 
