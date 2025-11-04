@@ -121,7 +121,7 @@ def _validate_constraints(
                 " It will be dominated by the other trials."
             )
             continue
-        if np.any(np.isnan(np.array(_constraints))):
+        if np.isnan(np.asarray(_constraints)).any():
             raise ValueError("NaN is not acceptable as constraint value.")
         elif len(_constraints) != num_constraints:
             raise ValueError("Trials with different numbers of constraints cannot be compared.")
