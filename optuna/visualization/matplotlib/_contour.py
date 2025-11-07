@@ -90,7 +90,8 @@ def _get_contour_plot(info: _ContourInfo) -> "Axes":
         axs.set_title("Contour Plot")
         cmap = _set_cmap(reverse_scale)
 
-        cs = _generate_contour_subplot(sub_plot_infos[0][0], axs, cmap)
+        # Precompute common objects for _generate_contour_subplot to reduce repeated computation
+        cs = _generate_contour_subplot_cached(sub_plot_infos[0][0], axs, cmap)
         if isinstance(cs, ContourSet):
             axcb = fig.colorbar(cs)
             axcb.set_label(target_name)
@@ -103,10 +104,17 @@ def _get_contour_plot(info: _ContourInfo) -> "Axes":
 
         # Prepare data and draw contour plots.
         cs_list = []
+        # Use local caching dictionary to avoid recomputing for common _AxisInfo instances
+        cached_axis_data = {}
+        cached_grid_data = {}
         for x_i in range(len(sorted_params)):
             for y_i in range(len(sorted_params)):
                 ax = axs[y_i, x_i]
-                cs = _generate_contour_subplot(sub_plot_infos[y_i][x_i], ax, cmap)
+                info_obj = sub_plot_infos[y_i][x_i]
+                cs = _generate_contour_subplot_cached(
+                    info_obj, ax, cmap,
+                    cached_axis_data, cached_grid_data
+                )
                 if isinstance(cs, ContourSet):
                     cs_list.append(cs)
         if cs_list:
@@ -362,3 +370,92 @@ def _interpolate_zmap(zmap: dict[tuple[int, int], float], contour_plot_num: int)
     z = scipy.sparse.linalg.spsolve(scipy.sparse.csc_matrix((a_data, (a_row, a_col))), b)
 
     return z.reshape((contour_plot_num, contour_plot_num))
+
+
+def _generate_contour_subplot_cached(
+    info: _SubContourInfo,
+    ax: "Axes",
+    cmap: "Colormap",
+    axis_data_cache: dict = None,
+    grid_data_cache: dict = None,
+) -> "ContourSet" | None:
+    ax.label_outer()
+
+    if len(info.xaxis.indices) < 2 or len(info.yaxis.indices) < 2:
+        return None
+
+    ax.set(xlabel=info.xaxis.name, ylabel=info.yaxis.name)
+    ax.set_xlim(info.xaxis.range[0], info.xaxis.range[1])
+    ax.set_ylim(info.yaxis.range[0], info.yaxis.range[1])
+
+    # Use object IDs for cache keys, safe since _AxisInfo and _SubContourInfo are not mutated.
+    x_axis_id = id(info.xaxis)
+    y_axis_id = id(info.yaxis)
+    info_id = id(info)
+
+    if axis_data_cache is not None:
+        x_data = axis_data_cache.get((x_axis_id, 'x'))
+        y_data = axis_data_cache.get((y_axis_id, 'y'))
+        if x_data is None or y_data is None:
+            x_values, y_values = _filter_missing_values(info.xaxis, info.yaxis)
+            x_data = _calculate_axis_data(info.xaxis, x_values)
+            y_data = _calculate_axis_data(info.yaxis, y_values)
+            axis_data_cache[(x_axis_id, 'x')] = x_data
+            axis_data_cache[(y_axis_id, 'y')] = y_data
+        xi, x_cat_param_label, x_cat_param_pos, _ = x_data
+        yi, y_cat_param_label, y_cat_param_pos, _ = y_data
+    else:
+        x_values, y_values = _filter_missing_values(info.xaxis, info.yaxis)
+        xi, x_cat_param_label, x_cat_param_pos, _ = _calculate_axis_data(info.xaxis, x_values)
+        yi, y_cat_param_label, y_cat_param_pos, _ = _calculate_axis_data(info.yaxis, y_values)
+
+    if info.xaxis.is_cat:
+        ax.set_xticks(x_cat_param_pos)
+        ax.set_xticklabels(x_cat_param_label)
+    else:
+        ax.set_xscale("log" if info.xaxis.is_log else "linear")
+    if info.yaxis.is_cat:
+        ax.set_yticks(y_cat_param_pos)
+        ax.set_yticklabels(y_cat_param_label)
+    else:
+        ax.set_yscale("log" if info.yaxis.is_log else "linear")
+
+    if info.xaxis.name == info.yaxis.name:
+        return None
+
+    if grid_data_cache is not None:
+        griddata_tuple = grid_data_cache.get(info_id)
+        if griddata_tuple is None:
+            griddata_tuple = _calculate_griddata(info)
+            grid_data_cache[info_id] = griddata_tuple
+        zi, feasible_plot_values, infeasible_plot_values = griddata_tuple
+    else:
+        zi, feasible_plot_values, infeasible_plot_values = _calculate_griddata(info)
+
+    cs = None
+    if len(zi) > 0:
+        # Contour the gridded data.
+        ax.contour(xi, yi, zi, 15, linewidths=0.5, colors="k")
+        cs = ax.contourf(xi, yi, zi, 15, cmap=cmap.reversed())
+        assert isinstance(cs, ContourSet)
+        # Plot data points.
+        ax.scatter(
+            feasible_plot_values.x,
+            feasible_plot_values.y,
+            marker="o",
+            c="black",
+            s=20,
+            edgecolors="grey",
+            linewidth=2.0,
+        )
+        ax.scatter(
+            infeasible_plot_values.x,
+            infeasible_plot_values.y,
+            marker="o",
+            c="#cccccc",
+            s=20,
+            edgecolors="grey",
+            linewidth=2.0,
+        )
+
+    return cs
