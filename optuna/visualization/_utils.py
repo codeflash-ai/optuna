@@ -17,6 +17,7 @@ from optuna.study import Study
 from optuna.study._study_direction import StudyDirection
 from optuna.trial import FrozenTrial
 from optuna.visualization import _plotly_imports
+import plotly.colors
 
 
 __all__ = ["is_available"]
@@ -187,15 +188,48 @@ def _make_json_compatible(value: Any) -> Any:
 
 
 def _make_hovertext(trial: FrozenTrial) -> str:
-    user_attrs = {key: _make_json_compatible(value) for key, value in trial.user_attrs.items()}
+    user_attrs = {}
+    # Inline optimized _make_json_compatible loop for improved locality and memory use
+    items = trial.user_attrs.items()
+    for key, value in items:
+        # Fast-path for types known to be JSON serializable
+        if isinstance(value, (str, int, float, bool, type(None))):
+            user_attrs[key] = value
+        elif isinstance(value, (list, tuple)):
+            if all(isinstance(v, (str, int, float, bool, type(None))) for v in value):
+                user_attrs[key] = value
+            else:
+                try:
+                    json.dumps(value)
+                    user_attrs[key] = value
+                except TypeError:
+                    user_attrs[key] = str(value)
+        elif isinstance(value, dict):
+            if all(
+                isinstance(k, str) and isinstance(v, (str, int, float, bool, type(None)))
+                for k, v in value.items()
+            ):
+                user_attrs[key] = value
+            else:
+                try:
+                    json.dumps(value)
+                    user_attrs[key] = value
+                except TypeError:
+                    user_attrs[key] = str(value)
+        else:
+            try:
+                json.dumps(value)
+                user_attrs[key] = value
+            except TypeError:
+                user_attrs[key] = str(value)
     user_attrs_dict = {"user_attrs": user_attrs} if user_attrs else {}
-    text = json.dumps(
-        {
-            "number": trial.number,
-            "values": trial.values,
-            "params": trial.params,
-            **user_attrs_dict,
-        },
-        indent=2,
-    )
+    # Avoid building unnecessary intermediate dict on each call
+    d = {
+        "number": trial.number,
+        "values": trial.values,
+        "params": trial.params,
+    }
+    if user_attrs_dict:
+        d["user_attrs"] = user_attrs
+    text = json.dumps(d, indent=2)
     return text.replace("\n", "<br>")
