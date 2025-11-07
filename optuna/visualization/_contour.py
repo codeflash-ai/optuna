@@ -362,7 +362,7 @@ def _get_contour_subplot_info(
 
 def _satisfy_constraints(trial: FrozenTrial) -> bool:
     constraints = trial.system_attrs.get(_CONSTRAINTS_KEY)
-    return constraints is None or all([x <= 0.0 for x in constraints])
+    return constraints is None or all(x <= 0.0 for x in constraints)
 
 
 def _get_axis_info(trials: list[FrozenTrial], param_name: str) -> _AxisInfo:
