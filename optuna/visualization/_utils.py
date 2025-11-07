@@ -18,6 +18,8 @@ from optuna.study._study_direction import StudyDirection
 from optuna.trial import FrozenTrial
 from optuna.visualization import _plotly_imports
 
+_MINIMIZE = StudyDirection.MINIMIZE
+
 
 __all__ = ["is_available"]
 _logger = optuna.logging.get_logger(__name__)
@@ -174,7 +176,7 @@ def _filter_nonfinite(
 
 
 def _is_reverse_scale(study: Study, target: Callable[[FrozenTrial], float] | None) -> bool:
-    return target is not None or study.direction == StudyDirection.MINIMIZE
+    return target is not None or study.direction is _MINIMIZE
 
 
 def _make_json_compatible(value: Any) -> Any:
