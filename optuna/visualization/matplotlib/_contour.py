@@ -126,7 +126,7 @@ class _LabelEncoder:
         self.labels: list[str] = []
 
     def fit(self, labels: list[str]) -> "_LabelEncoder":
-        self.labels = sorted(set(labels))
+        self.labels = sorted(dict.fromkeys(labels))
         return self
 
     def transform(self, labels: list[str]) -> list[int]:
