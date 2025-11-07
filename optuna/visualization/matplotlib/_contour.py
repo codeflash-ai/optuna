@@ -147,10 +147,12 @@ def _filter_missing_values(
 ) -> tuple[list[str | float], list[str | float]]:
     x_values = []
     y_values = []
+    append_x = x_values.append
+    append_y = y_values.append
     for x_value, y_value in zip(xaxis.values, yaxis.values):
         if x_value is not None and y_value is not None:
-            x_values.append(x_value)
-            y_values.append(y_value)
+            append_x(x_value)
+            append_y(y_value)
     return x_values, y_values
 
 
