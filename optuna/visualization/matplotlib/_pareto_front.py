@@ -9,6 +9,7 @@ from optuna.trial import FrozenTrial
 from optuna.visualization._pareto_front import _get_pareto_front_info
 from optuna.visualization._pareto_front import _ParetoFrontInfo
 from optuna.visualization.matplotlib._matplotlib_imports import _imports
+import numpy as np
 
 
 if _imports.is_successful():
@@ -112,24 +113,27 @@ def _get_pareto_front_2d(info: _ParetoFrontInfo) -> "Axes":
 
     trial_label: str = "Trial"
     if len(info.infeasible_trials_with_values) > 0:
+        values_array = np.array([values for _, values in info.infeasible_trials_with_values])
         ax.scatter(
-            x=[values[info.axis_order[0]] for _, values in info.infeasible_trials_with_values],
-            y=[values[info.axis_order[1]] for _, values in info.infeasible_trials_with_values],
+            x=values_array[:, info.axis_order[0]],
+            y=values_array[:, info.axis_order[1]],
             color="#cccccc",
             label="Infeasible Trial",
         )
         trial_label = "Feasible Trial"
     if len(info.non_best_trials_with_values) > 0:
+        values_array = np.array([values for _, values in info.non_best_trials_with_values])
         ax.scatter(
-            x=[values[info.axis_order[0]] for _, values in info.non_best_trials_with_values],
-            y=[values[info.axis_order[1]] for _, values in info.non_best_trials_with_values],
+            x=values_array[:, info.axis_order[0]],
+            y=values_array[:, info.axis_order[1]],
             color=cmap(0),
             label=trial_label,
         )
     if len(info.best_trials_with_values) > 0:
+        values_array = np.array([values for _, values in info.best_trials_with_values])
         ax.scatter(
-            x=[values[info.axis_order[0]] for _, values in info.best_trials_with_values],
-            y=[values[info.axis_order[1]] for _, values in info.best_trials_with_values],
+            x=values_array[:, info.axis_order[0]],
+            y=values_array[:, info.axis_order[1]],
             color=cmap(3),
             label="Best Trial",
         )
@@ -157,29 +161,32 @@ def _get_pareto_front_3d(info: _ParetoFrontInfo) -> "Axes":
         info.infeasible_trials_with_values is not None
         and len(info.infeasible_trials_with_values) > 0
     ):
+        values_array = np.array([values for _, values in info.infeasible_trials_with_values])
         ax.scatter(
-            xs=[values[info.axis_order[0]] for _, values in info.infeasible_trials_with_values],
-            ys=[values[info.axis_order[1]] for _, values in info.infeasible_trials_with_values],
-            zs=[values[info.axis_order[2]] for _, values in info.infeasible_trials_with_values],
+            xs=values_array[:, info.axis_order[0]],
+            ys=values_array[:, info.axis_order[1]],
+            zs=values_array[:, info.axis_order[2]],
             color="#cccccc",
             label="Infeasible Trial",
         )
         trial_label = "Feasible Trial"
 
     if info.non_best_trials_with_values is not None and len(info.non_best_trials_with_values) > 0:
+        values_array = np.array([values for _, values in info.non_best_trials_with_values])
         ax.scatter(
-            xs=[values[info.axis_order[0]] for _, values in info.non_best_trials_with_values],
-            ys=[values[info.axis_order[1]] for _, values in info.non_best_trials_with_values],
-            zs=[values[info.axis_order[2]] for _, values in info.non_best_trials_with_values],
+            xs=values_array[:, info.axis_order[0]],
+            ys=values_array[:, info.axis_order[1]],
+            zs=values_array[:, info.axis_order[2]],
             color=cmap(0),
             label=trial_label,
         )
 
     if info.best_trials_with_values is not None and len(info.best_trials_with_values):
+        values_array = np.array([values for _, values in info.best_trials_with_values])
         ax.scatter(
-            xs=[values[info.axis_order[0]] for _, values in info.best_trials_with_values],
-            ys=[values[info.axis_order[1]] for _, values in info.best_trials_with_values],
-            zs=[values[info.axis_order[2]] for _, values in info.best_trials_with_values],
+            xs=values_array[:, info.axis_order[0]],
+            ys=values_array[:, info.axis_order[1]],
+            zs=values_array[:, info.axis_order[2]],
             color=cmap(3),
             label="Best Trial",
         )
