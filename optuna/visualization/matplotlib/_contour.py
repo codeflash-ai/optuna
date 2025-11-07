@@ -15,6 +15,7 @@ from optuna.visualization._contour import _get_contour_info
 from optuna.visualization._contour import _PlotValues
 from optuna.visualization._contour import _SubContourInfo
 from optuna.visualization.matplotlib._matplotlib_imports import _imports
+import scipy
 
 
 with try_import() as _optuna_imports:
@@ -165,15 +166,16 @@ def _calculate_axis_data(
     if axis.is_cat:
         enc = _LabelEncoder()
         # Fit LabelEncoder with all the categories in categorical distribution.
-        enc.fit(list(map(str, filter(lambda value: value is not None, axis.values))))
+        all_axis_values = [str(value) for value in axis.values if value is not None]
+        enc.fit(all_axis_values)
         # Then transform the values using the fitted label encoder.
-        # Note that `values` may not include all the categories,
-        # so we use `axis.values` for fitting.
-        returned_values = enc.transform(list(map(str, values)))
+        returned_values = enc.transform([str(value) for value in values])
         cat_param_labels = enc.get_labels()
         cat_param_pos = enc.get_indices()
     else:
-        returned_values = list(map(lambda x: float(x), values))
+        returned_values = [float(x) for x in values]
+
+    # For x and y, create 1-D array of evenly spaced coordinates on linear or log scale.
 
     # For x and y, create 1-D array of evenly spaced coordinates on linear or log scale.
     if axis.is_log:
@@ -189,20 +191,27 @@ def _calculate_griddata(info: _SubContourInfo) -> tuple[np.ndarray, _PlotValues,
     yaxis = info.yaxis
     z_values_dict = info.z_values
 
-    x_values = []
-    y_values = []
-    z_values = []
-    for x_value, y_value in zip(xaxis.values, yaxis.values):
-        if x_value is not None and y_value is not None:
-            x_values.append(x_value)
-            y_values.append(y_value)
-            x_i = xaxis.indices.index(x_value)
-            y_i = yaxis.indices.index(y_value)
-            z_values.append(z_values_dict[(x_i, y_i)])
+    # Precompute non-None indices, and use NumPy arrays for faster filtering and indexing
+    xaxis_vals = np.array(xaxis.values)
+    yaxis_vals = np.array(yaxis.values)
+    # Find positions where both x and y are not None
+    mask_valid = (xaxis_vals != None) & (yaxis_vals != None)
+    # It is faster to use np.where, but since these values can be str/float, we'll use tolist()
+    x_values = xaxis_vals[mask_valid].tolist()
+    y_values = yaxis_vals[mask_valid].tolist()
 
-    # Return empty values when x or y has no value.
-    if len(x_values) == 0 or len(y_values) == 0:
+    # If no valid values, return empty values
+    if not x_values or not y_values:
         return np.array([]), _PlotValues([], []), _PlotValues([], [])
+
+    # For indices lookup, precompute both as sets for O(1) lookup.
+    xindex_lookup = {val: idx for idx, val in enumerate(xaxis.indices)}
+    yindex_lookup = {val: idx for idx, val in enumerate(yaxis.indices)}
+    # Use list comprehension rather than zip and append for faster creation.
+    z_values = [
+        z_values_dict[(xindex_lookup[x_value], yindex_lookup[y_value])]
+        for x_value, y_value in zip(x_values, y_values)
+    ]
 
     xi, cat_param_labels_x, cat_param_pos_x, transformed_x_values = _calculate_axis_data(
         xaxis,
@@ -222,16 +231,21 @@ def _calculate_griddata(info: _SubContourInfo) -> tuple[np.ndarray, _PlotValues,
         zi = _interpolate_zmap(zmap, CONTOUR_POINT_NUM)
 
     # categorize by constraints
-    feasible = _PlotValues([], [])
-    infeasible = _PlotValues([], [])
-
-    for x_value, y_value, c in zip(transformed_x_values, transformed_y_values, info.constraints):
+    constraints_arr = np.array(info.constraints)
+    feasible_x = []
+    feasible_y = []
+    infeasible_x = []
+    infeasible_y = []
+    for x_value, y_value, c in zip(transformed_x_values, transformed_y_values, constraints_arr):
         if c:
-            feasible.x.append(x_value)
-            feasible.y.append(y_value)
+            feasible_x.append(x_value)
+            feasible_y.append(y_value)
         else:
-            infeasible.x.append(x_value)
-            infeasible.y.append(y_value)
+            infeasible_x.append(x_value)
+            infeasible_y.append(y_value)
+
+    feasible = _PlotValues(feasible_x, feasible_y)
+    infeasible = _PlotValues(infeasible_x, infeasible_y)
 
     return zi, feasible, infeasible
 
@@ -301,21 +315,22 @@ def _create_zmap(
     xi: np.ndarray,
     yi: np.ndarray,
 ) -> dict[tuple[int, int], float]:
-    # Creates z-map from trial values and params.
-    # z-map is represented by hashmap of coordinate and trial value pairs.
-    #
-    # Coordinates are represented by tuple of integers, where the first item
-    # indicates x-axis index and the second item indicates y-axis index
-    # and refer to a position of trial value on irregular param grid.
-    #
-    # Since params were resampled either with linspace or logspace
-    # original params might not be on the x and y axes anymore
-    # so we are going with close approximations of trial value positions.
-    zmap = dict()
-    for x, y, z in zip(x_values, y_values, z_values):
-        xindex = int(np.argmin(np.abs(xi - x)))
-        yindex = int(np.argmin(np.abs(yi - y)))
-        zmap[(xindex, yindex)] = z
+    # Use NumPy arrays for candidate value computation.
+    xi_arr = xi
+    yi_arr = yi
+    zmap = {}
+    # Vectorized computation for index lookup (argmin over array)
+    x_array = np.array(x_values)
+    y_array = np.array(y_values)
+    z_array = np.array(z_values)
+    # Below, vectorize as much as possible
+    x_indices = np.abs(xi_arr[np.newaxis, :] - x_array[:, np.newaxis])
+    x_min = np.argmin(x_indices, axis=1)
+    y_indices = np.abs(yi_arr[np.newaxis, :] - y_array[:, np.newaxis])
+    y_min = np.argmin(y_indices, axis=1)
+    # Dictionary from tuple index to z value. No duplicate keys in zipped loop.
+    for idx in range(len(z_array)):
+        zmap[(x_min[idx], y_min[idx])] = z_array[idx]
 
     return zmap
 
@@ -337,28 +352,41 @@ def _interpolate_zmap(zmap: dict[tuple[int, int], float], contour_plot_num: int)
     #     z[x, y] = zmap[(x, y)]                                  (if zmap[(x, y)] is given)
     # 4 * z[x, y] = z[x-1, y] + z[x+1, y] + z[x, y-1] + z[x, y+1] (if zmap[(x, y)] is not given)
 
+    # Preallocate arrays (avoid repeated list appends)
+    sz = contour_plot_num
+    N = sz * sz
+    b = np.zeros(N)
+    # We know the matrix will be at most 5 nonzeroes per row (interior)
+    # Use lists for COO format
     a_data = []
     a_row = []
     a_col = []
-    b = np.zeros(contour_plot_num**2)
-    for x in range(contour_plot_num):
-        for y in range(contour_plot_num):
-            grid_index = y * contour_plot_num + x
-            if (x, y) in zmap:
+    # Vectorize neighbor offsets to avoid repeated for-loop lookups
+    offsets = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    # Precompute keys for fast lookup
+    zmap_keys = set(zmap.keys())
+    for x in range(sz):
+        for y in range(sz):
+            grid_index = y * sz + x
+            if (x, y) in zmap_keys:
                 a_data.append(1)
                 a_row.append(grid_index)
                 a_col.append(grid_index)
                 b[grid_index] = zmap[(x, y)]
             else:
-                for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                    if 0 <= x + dx < contour_plot_num and 0 <= y + dy < contour_plot_num:
-                        a_data.append(1)
-                        a_row.append(grid_index)
-                        a_col.append(grid_index)
+                a_data.append(4)
+                a_row.append(grid_index)
+                a_col.append(grid_index)
+                for dx, dy in offsets:
+                    xn = x + dx
+                    yn = y + dy
+                    if 0 <= xn < sz and 0 <= yn < sz:
+                        neighbor_index = yn * sz + xn
                         a_data.append(-1)
                         a_row.append(grid_index)
-                        a_col.append(grid_index + dy * contour_plot_num + dx)
+                        a_col.append(neighbor_index)
 
-    z = scipy.sparse.linalg.spsolve(scipy.sparse.csc_matrix((a_data, (a_row, a_col))), b)
+    A = scipy.sparse.csc_matrix((a_data, (a_row, a_col)), shape=(N, N))
+    z = scipy.sparse.linalg.spsolve(A, b)
 
-    return z.reshape((contour_plot_num, contour_plot_num))
+    return z.reshape((sz, sz))
