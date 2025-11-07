@@ -236,7 +236,7 @@ def _get_current_rung(trial: "optuna.trial.FrozenTrial") -> int:
 
 
 def _completed_rung_key(rung: int) -> str:
-    return "completed_rung_{}".format(rung)
+    return f"completed_rung_{rung}"
 
 
 def _get_competing_values(
