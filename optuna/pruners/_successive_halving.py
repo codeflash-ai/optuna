@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import heapq
 import math
 
 import optuna
@@ -228,15 +229,24 @@ def _estimate_min_resource(trials: list["optuna.trial.FrozenTrial"]) -> int | No
 
 
 def _get_current_rung(trial: "optuna.trial.FrozenTrial") -> int:
-    # The following loop takes `O(log step)` iterations.
-    rung = 0
-    while _completed_rung_key(rung) in trial.system_attrs:
-        rung += 1
-    return rung
+    # This function was optimized to avoid repeated string creation and dict lookups in a loop.
+    # Since system_attrs keys are of the form 'completed_rung_N', we can count such keys directly.
+    count = 0
+    prefix = "completed_rung_"
+    for k in trial.system_attrs:
+        if k.startswith(prefix):
+            try:
+                int_val = int(k[len(prefix) :])
+                if int_val >= 0:
+                    count += 1
+            except ValueError:
+                continue
+    return count
 
 
 def _completed_rung_key(rung: int) -> str:
-    return "completed_rung_{}".format(rung)
+    # Use faster f-string formatting.
+    return f"completed_rung_{rung}"
 
 
 def _get_competing_values(
@@ -253,15 +263,22 @@ def _is_trial_promotable_to_next_rung(
     reduction_factor: int,
     study_direction: StudyDirection,
 ) -> bool:
-    promotable_idx = (len(competing_values) // reduction_factor) - 1
+    # Optimize by using heapq for top-k instead of sorting the whole list.
+    n = len(competing_values)
+    promotable_idx = (n // reduction_factor) - 1
 
     if promotable_idx == -1:
         # Optuna does not support suspending or resuming ongoing trials. Therefore, for the first
         # `eta - 1` trials, this implementation instead promotes the trial if its value is the
         # smallest one among the competing values.
         promotable_idx = 0
-
-    competing_values.sort()
     if study_direction == StudyDirection.MAXIMIZE:
-        return value >= competing_values[-(promotable_idx + 1)]
-    return value <= competing_values[promotable_idx]
+        # Find the k-th largest value efficiently
+        k = promotable_idx + 1
+        kth_value = heapq.nlargest(k, competing_values)[-1]
+        return value >= kth_value
+    else:
+        # Find the k-th smallest value efficiently
+        k = promotable_idx + 1
+        kth_value = heapq.nsmallest(k, competing_values)[-1]
+        return value <= kth_value
