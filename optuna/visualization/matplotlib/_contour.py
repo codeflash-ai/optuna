@@ -26,6 +26,10 @@ if _imports.is_successful():
     from optuna.visualization.matplotlib._matplotlib_imports import ContourSet
     from optuna.visualization.matplotlib._matplotlib_imports import plt
 
+_blues_r_cmap = plt.get_cmap("Blues_r")
+
+_blues_cmap = plt.get_cmap("Blues")
+
 
 CONTOUR_POINT_NUM = 100
 
@@ -117,8 +121,7 @@ def _get_contour_plot(info: _ContourInfo) -> "Axes":
 
 
 def _set_cmap(reverse_scale: bool) -> "Colormap":
-    cmap = "Blues_r" if not reverse_scale else "Blues"
-    return plt.get_cmap(cmap)
+    return _blues_r_cmap if not reverse_scale else _blues_cmap
 
 
 class _LabelEncoder:
