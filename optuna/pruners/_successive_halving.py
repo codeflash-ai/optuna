@@ -215,15 +215,19 @@ class SuccessiveHalvingPruner(BasePruner):
 
 
 def _estimate_min_resource(trials: list["optuna.trial.FrozenTrial"]) -> int | None:
-    n_steps = [
-        t.last_step for t in trials if t.state == TrialState.COMPLETE and t.last_step is not None
-    ]
+    # Use a generator and local variable for TrialState for performance.
+    COMPLETE = TrialState.COMPLETE
+    n_steps_iter = (t.last_step for t in trials if t.state == COMPLETE and t.last_step is not None)
 
-    if not n_steps:
+    # Loop for max search avoiding extra list allocation.
+    last_step = None
+    for step in n_steps_iter:
+        if last_step is None or step > last_step:
+            last_step = step
+
+    if last_step is None:
         return None
 
-    # Get the maximum number of steps and divide it by 100.
-    last_step = max(n_steps)
     return max(last_step // 100, 1)
 
 
