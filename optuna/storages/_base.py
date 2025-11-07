@@ -1,19 +1,15 @@
 from __future__ import annotations
 
 import abc
-from collections.abc import Container
-from collections.abc import Sequence
-from typing import Any
-from typing import cast
+from collections.abc import Container, Sequence
+from typing import Any, cast
 
 from optuna._typing import JSONSerializable
 from optuna.distributions import BaseDistribution
 from optuna.exceptions import UpdateFinishedTrialError
 from optuna.study._frozen import FrozenStudy
 from optuna.study._study_direction import StudyDirection
-from optuna.trial import FrozenTrial
-from optuna.trial import TrialState
-
+from optuna.trial import FrozenTrial, TrialState
 
 DEFAULT_STUDY_NAME_PREFIX = "no-name-"
 
