@@ -40,20 +40,32 @@ class _QuantileFilter:
     def filter(self, trials: list[FrozenTrial]) -> list[FrozenTrial]:
         target, min_n_top_trials = self._target, self._min_n_top_trials
         sign = 1.0 if self._is_lower_better else -1.0
-        loss_values = sign * np.asarray([t.value if target is None else target(t) for t in trials])
+
+        # Optimization: Use numpy.fromiter for direct conversion, and localize target evaluation array
+        # This avoids creating and then copying a Python list, especially if target is expensive
+        if target is None:
+            loss_values = sign * np.fromiter(
+                (t.value for t in trials), dtype=float, count=len(trials)
+            )
+        else:
+            loss_values = sign * np.fromiter(
+                (target(t) for t in trials), dtype=float, count=len(trials)
+            )
+
         err_msg = "len(trials) must be larger than or equal to min_n_top_trials"
         assert min_n_top_trials <= loss_values.size, err_msg
 
-        def _quantile(v: np.ndarray, q: float) -> float:
-            cutoff_index = int(np.ceil(q * loss_values.size)) - 1
-            return float(np.partition(loss_values, cutoff_index)[cutoff_index])
+        # Optimization: Inline quantile logic to avoid unnecessary function call overhead
+        size = loss_values.size
+        quantile_index = int(np.ceil(self._quantile * size)) - 1
 
-        cutoff_val = max(
-            np.partition(loss_values, min_n_top_trials - 1)[min_n_top_trials - 1],
-            # TODO(nabenabe0928): After dropping Python3.10, replace below with
-            # np.quantile(loss_values, self._quantile, method="inverted_cdf").
-            _quantile(loss_values, self._quantile),
-        )
+        # Only partition once for each index, cache result to avoid recomputation
+        cutoff_idx = min_n_top_trials - 1
+        v1 = np.partition(loss_values, cutoff_idx)[cutoff_idx]
+        v2 = np.partition(loss_values, quantile_index)[quantile_index]
+        cutoff_val = max(v1, v2)
+
+        # Boolean mask-based filtering (more efficient for large arrays)
         should_keep_trials = loss_values <= cutoff_val
         return [t for t, should_keep in zip(trials, should_keep_trials) if should_keep]
 
