@@ -22,6 +22,7 @@ import numpy as np
 
 from optuna._imports import try_import
 from optuna.importance._fanova._tree import _FanovaTree
+from sklearn.ensemble import RandomForestRegressor
 
 
 with try_import() as _imports:
@@ -104,5 +105,6 @@ class _Fanova:
 
         for tree_index, tree in enumerate(self._trees):
             marginal_variance = tree.get_marginal_variance(raw_features)
-            variances[tree_index] = np.clip(marginal_variance, 0.0, None)
+            variances[tree_index] = marginal_variance if marginal_variance > 0.0 else 0.0
+
         self._variances[feature] = variances
