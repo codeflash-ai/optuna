@@ -292,9 +292,8 @@ class _TickInfo(NamedTuple):
 
 
 def _get_tick_info(target_values: np.ndarray) -> _TickInfo:
-    sorted_target_values = np.sort(target_values)
     coloridxs = [0, 0.25, 0.5, 0.75, 1]
-    values = np.quantile(sorted_target_values, coloridxs)
+    values = np.quantile(target_values, coloridxs)
     rank_text = ["min.", "25%", "50%", "75%", "max."]
     text = [f"{rank_text[i]} ({values[i]:3g})" for i in range(len(values))]
     return _TickInfo(coloridxs=coloridxs, text=text)
