@@ -107,33 +107,35 @@ class VSBXCrossover(BaseCrossover):
         else:
             c2 = 0.5 * (-(1 - beta_1) * parents_params[0] + (3 - beta_2) * parents_params[1])
 
-        # vSBX applies crossover with use_child_gene_prob and uniform_crossover_prob.
-        # the gene of the parent individual is the gene of the child individual.
-        # The original vSBX creates two child individuals,
-        # but optuna's implementation creates only one child individual.
-        # Therefore, when there is no crossover,
-        # the gene is selected with equal probability from the parent individuals x1 and x2.
+        # Vectorized implementation for per-parameter child selection:
+        # Pre-generate the random numbers needed for each decision step.
+        use_child_mask = rng.rand(len(search_space_bounds)) < self._use_child_gene_prob
+        crossover_mask = rng.rand(len(search_space_bounds)) >= self._uniform_crossover_prob
 
-        child1_params_list = []
-        child2_params_list = []
+        # For vectorized selection:
+        # When use_child_mask is True:
+        #     if crossover_mask: use (c1, c2)
+        #     else: use (c2, c1)
+        # When use_child_mask is False:
+        #     if crossover_mask: use (x1, x2)
+        #     else: use (x2, x1)
+        x1 = parents_params[0]
+        x2 = parents_params[1]
 
-        for c1_i, c2_i, x1_i, x2_i in zip(c1, c2, parents_params[0], parents_params[1]):
-            if rng.rand() < self._use_child_gene_prob:
-                if rng.rand() >= self._uniform_crossover_prob:
-                    child1_params_list.append(c1_i)
-                    child2_params_list.append(c2_i)
-                else:
-                    child1_params_list.append(c2_i)
-                    child2_params_list.append(c1_i)
-            else:
-                if rng.rand() >= self._uniform_crossover_prob:
-                    child1_params_list.append(x1_i)
-                    child2_params_list.append(x2_i)
-                else:
-                    child1_params_list.append(x2_i)
-                    child2_params_list.append(x1_i)
+        # For use_child_mask == True
+        child1_params_child = np.where(crossover_mask, c1, c2)
+        child2_params_child = np.where(crossover_mask, c2, c1)
+        # For use_child_mask == False
+        child1_params_parent = np.where(crossover_mask, x1, x2)
+        child2_params_parent = np.where(crossover_mask, x2, x1)
 
-        child_params_list = child1_params_list if rng.rand() < 0.5 else child2_params_list
-        child_params = np.array(child_params_list)
+        child1_params = np.where(use_child_mask, child1_params_child, child1_params_parent)
+        child2_params = np.where(use_child_mask, child2_params_child, child2_params_parent)
+
+        # Select which child to return as params
+        if rng.rand() < 0.5:
+            child_params = child1_params
+        else:
+            child_params = child2_params
 
         return child_params
