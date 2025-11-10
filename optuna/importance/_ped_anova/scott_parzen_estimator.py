@@ -120,19 +120,17 @@ def _count_numerical_param_in_grid(
     n_grids, grid_indices_of_trials = _get_grids_and_grid_indices_of_trials(
         param_name, dist, trials, n_steps
     )
-    unique_vals, counts_in_unique = np.unique(grid_indices_of_trials, return_counts=True)
-    counts = np.zeros(n_grids, dtype=np.int32)
-    counts[unique_vals] += counts_in_unique
+    counts = np.bincount(grid_indices_of_trials, minlength=n_grids)[:n_grids].astype(np.int32)
     return counts
 
 
 def _count_categorical_param_in_grid(
     param_name: str, dist: CategoricalDistribution, trials: list[FrozenTrial]
 ) -> np.ndarray:
-    cat_indices = [int(dist.to_internal_repr(t.params[param_name])) for t in trials]
-    unique_vals, counts_in_unique = np.unique(cat_indices, return_counts=True)
-    counts = np.zeros(len(dist.choices), dtype=np.int32)
-    counts[unique_vals] += counts_in_unique
+    cat_indices = np.empty(len(trials), dtype=np.intp)
+    for i, t in enumerate(trials):
+        cat_indices[i] = int(dist.to_internal_repr(t.params[param_name]))
+    counts = np.bincount(cat_indices, minlength=len(dist.choices)).astype(np.int32)
     return counts
 
 
