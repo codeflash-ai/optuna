@@ -22,6 +22,7 @@ import numpy as np
 
 from optuna._imports import try_import
 from optuna.importance._fanova._tree import _FanovaTree
+from sklearn.ensemble import RandomForestRegressor
 
 
 with try_import() as _imports:
@@ -79,16 +80,19 @@ class _Fanova:
 
         self._compute_variances(feature)
 
-        fractions: list[float] | np.ndarray = []
+        fractions = np.empty(len(self._trees), dtype=np.float64)
+        count = 0
 
         for tree_index, tree in enumerate(self._trees):
             tree_variance = tree.variance
             if tree_variance > 0.0:
-                fraction = self._variances[feature][tree_index] / tree_variance
-                fractions = np.append(fractions, fraction)
+                fractions[count] = self._variances[feature][tree_index] / tree_variance
+                count += 1
 
-        fractions = np.asarray(fractions)
+        if count == 0:
+            return float(np.nan), float(np.nan)
 
+        fractions = fractions[:count]
         return float(fractions.mean()), float(fractions.std())
 
     def _compute_variances(self, feature: int) -> None:
@@ -100,9 +104,11 @@ class _Fanova:
             return
 
         raw_features = self._column_to_encoded_columns[feature]
-        variances = np.empty(len(self._trees), dtype=np.float64)
-
-        for tree_index, tree in enumerate(self._trees):
+        trees = self._trees
+        # Preallocate result array for efficiency; avoid np.clip within the loop
+        variances = np.empty(len(trees), dtype=np.float64)
+        for tree_index, tree in enumerate(trees):
             marginal_variance = tree.get_marginal_variance(raw_features)
-            variances[tree_index] = np.clip(marginal_variance, 0.0, None)
+            # Write clipped values directly to result array
+            variances[tree_index] = marginal_variance if marginal_variance > 0.0 else 0.0
         self._variances[feature] = variances
