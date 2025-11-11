@@ -198,18 +198,13 @@ def _associate_individuals_with_reference_points(
     # distance_from_reference_lines is a ndarray of shape (n, p), where n is the size of the
     # population and p is the number of reference points. Its (i,j) entry keeps distance between
     # the i-th individual values and the j-th reference line.
-    reference_point_norm_squared = np.linalg.norm(reference_points, axis=1) ** 2
-    perpendicular_vectors_to_reference_lines = np.einsum(
-        "ni,pi,p,pm->npm",
-        objective_matrix,
-        reference_points,
-        1 / reference_point_norm_squared,
-        reference_points,
-    )
-    distance_from_reference_lines = np.linalg.norm(
-        objective_matrix[:, np.newaxis, :] - perpendicular_vectors_to_reference_lines,
-        axis=2,
-    )
+    reference_point_norm_squared = np.einsum('ij,ij->i', reference_points, reference_points)
+    dot_products = np.dot(objective_matrix, reference_points.T)
+    proj_lengths = dot_products / reference_point_norm_squared
+    projected = np.einsum('np,pi->npi', proj_lengths, reference_points)
+    differences = objective_matrix[:, None, :] - projected
+    distance_from_reference_lines = np.sqrt(np.einsum('npi,npi->np', differences, differences))
+
     closest_reference_points: np.ndarray = np.argmin(distance_from_reference_lines, axis=1)
     distance_reference_points: np.ndarray = np.min(distance_from_reference_lines, axis=1)
 
