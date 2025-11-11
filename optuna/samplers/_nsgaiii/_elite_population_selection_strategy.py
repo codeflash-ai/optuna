@@ -116,10 +116,15 @@ def _generate_default_reference_point(
 
 
 def _filter_inf(population: list[FrozenTrial]) -> np.ndarray:
-    objective_matrix = np.asarray([t.values for t in population])
-    objective_matrix_with_nan = np.where(np.isfinite(objective_matrix), objective_matrix, np.nan)
-    max_objectives = np.nanmax(objective_matrix_with_nan, axis=0)
-    min_objectives = np.nanmin(objective_matrix_with_nan, axis=0)
+    objective_matrix = np.asarray([t.values for t in population], dtype=np.float64)
+    if np.isinf(objective_matrix).any():
+        objective_matrix_with_nan = objective_matrix.copy()
+        np.place(objective_matrix_with_nan, ~np.isfinite(objective_matrix_with_nan), np.nan)
+        max_objectives = np.nanmax(objective_matrix_with_nan, axis=0)
+        min_objectives = np.nanmin(objective_matrix_with_nan, axis=0)
+    else:
+        max_objectives = np.max(objective_matrix, axis=0)
+        min_objectives = np.min(objective_matrix, axis=0)
     margins = _COEF * (max_objectives - min_objectives)
     return np.clip(objective_matrix, min_objectives - margins, max_objectives + margins)
 
