@@ -593,7 +593,7 @@ class JournalStorageReplayResult:
 
         for prev_trial_id in self._study_id_to_trial_ids[study_id]:
             prev_trial = self._trials[prev_trial_id]
-            if param_name in prev_trial.params.keys():
+            if param_name in prev_trial.params:
                 try:
                     check_distribution_compatibility(
                         prev_trial.distributions[param_name], distribution
@@ -605,11 +605,14 @@ class JournalStorageReplayResult:
                 break
 
         trial = copy.copy(self._trials[trial_id])
-        trial.params = {
-            **copy.copy(trial.params),
-            param_name: distribution.to_external_repr(param_value_internal),
-        }
-        trial.distributions = {**copy.copy(trial.distributions), param_name: distribution}
+        params = trial.params.copy()
+        params[param_name] = distribution.to_external_repr(param_value_internal)
+        trial.params = params
+
+        distributions = trial.distributions.copy()
+        distributions[param_name] = distribution
+        trial.distributions = distributions
+
         self._trials[trial_id] = trial
 
     def _apply_set_trial_state_values(self, log: dict[str, Any]) -> None:
