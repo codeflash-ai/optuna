@@ -58,21 +58,51 @@ def plot_timeline(study: Study, n_recent_trials: int | None = None) -> "go.Figur
 
 
 def _get_max_datetime_complete(study: Study) -> datetime.datetime:
-    max_run_duration = max(
-        [
-            t.datetime_complete - t.datetime_start
-            for t in study.trials
-            if t.datetime_complete is not None and t.datetime_start is not None
-        ],
-        default=None,
-    )
-    if _is_running_trials_in_study(study, max_run_duration):
-        return datetime.datetime.now()
+    # Cache study.trials only once (it's a property, likely to be fast but best to ensure only one access).
+    trials = study.trials
 
-    return max(
-        [t.datetime_complete for t in study.trials if t.datetime_complete is not None],
-        default=datetime.datetime.now(),
-    )
+    # Combine loops to only iterate study.trials once and generate all needed data in a single traversal.
+    max_run_duration: datetime.timedelta | None = None
+    any_running_trials = False
+    max_datetime_complete: datetime.datetime | None = None
+
+    now = None  # Will only compute now() if needed.
+
+    for t in trials:
+        ds = t.datetime_start
+        dc = t.datetime_complete
+
+        if dc is not None and ds is not None:
+            dur = dc - ds
+            if (max_run_duration is None) or (dur > max_run_duration):
+                max_run_duration = dur
+
+        if dc is not None:
+            if (max_datetime_complete is None) or (dc > max_datetime_complete):
+                max_datetime_complete = dc
+
+    # Optimize _is_running_trials_in_study logic in-place.
+    running_trials = study.get_trials(states=(TrialState.RUNNING,), deepcopy=False)
+    if max_run_duration is None:
+        return (
+            datetime.datetime.now()
+            if running_trials
+            else (
+                datetime.datetime.now() if max_datetime_complete is None else max_datetime_complete
+            )
+        )
+
+    if running_trials:
+        if now is None:
+            now = datetime.datetime.now()
+        mult = 5 * max_run_duration
+        for t in running_trials:
+            ds = t.datetime_start
+            if ds is not None and now - ds < mult:
+                return datetime.datetime.now()
+
+    # Return max datetime_complete, fallback to now
+    return max_datetime_complete if max_datetime_complete is not None else datetime.datetime.now()
 
 
 def _is_running_trials_in_study(study: Study, max_run_duration: datetime.timedelta | None) -> bool:
