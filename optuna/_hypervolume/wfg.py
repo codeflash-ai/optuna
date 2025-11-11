@@ -28,7 +28,9 @@ def _compute_3d(sorted_pareto_sols: np.ndarray, reference_point: np.ndarray) -> 
     y_order = np.argsort(sorted_pareto_sols[:, 1])
     z_delta = np.zeros((n, n), dtype=float)
     z_delta[y_order, np.arange(n)] = reference_point[2] - sorted_pareto_sols[y_order, 2]
-    z_delta = np.maximum.accumulate(np.maximum.accumulate(z_delta, axis=0), axis=1)
+    np.maximum.accumulate(z_delta, axis=0, out=z_delta)
+    for i in range(n):
+        np.maximum.accumulate(z_delta[i], axis=0, out=z_delta[i])
     # The x axis is already sorted, so no need to compress this coordinate.
     x_vals = sorted_pareto_sols[:, 0]
     y_vals = sorted_pareto_sols[y_order, 1]
