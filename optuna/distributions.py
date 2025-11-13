@@ -462,9 +462,16 @@ def _categorical_choice_equal(
     This function can handle NaNs like np.float32("nan") other than float.
     """
 
-    value1_is_nan = isinstance(value1, Real) and math.isnan(float(value1))
-    value2_is_nan = isinstance(value2, Real) and math.isnan(float(value2))
-    return (value1 == value2) or (value1_is_nan and value2_is_nan)
+    # Fast equality check first (covers all types except NaN edge case)
+    if value1 == value2:
+        return True
+
+    # Optimize isinstance checks by combining them, avoids repeated calls
+    if not (isinstance(value1, Real) and isinstance(value2, Real)):
+        return False
+
+    # Directly check if both are NaN
+    return math.isnan(value1) and math.isnan(value2)
 
 
 class CategoricalDistribution(BaseDistribution):
@@ -766,7 +773,9 @@ def _convert_old_distribution_to_new_distribution(
 
 
 def _is_distribution_log(distribution: BaseDistribution) -> bool:
-    if isinstance(distribution, (FloatDistribution, IntDistribution)):
+    # Combined branch: avoid isinstance if guaranteed not to match
+    dist_type = type(distribution)
+    if dist_type is FloatDistribution or dist_type is IntDistribution:
         return distribution.log
 
     return False
