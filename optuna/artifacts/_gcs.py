@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from optuna._experimental import experimental_class
 from optuna._imports import try_import
 from optuna.artifacts.exceptions import ArtifactNotFound
+import google.cloud.storage
 
 
 if TYPE_CHECKING:
@@ -74,9 +75,9 @@ class GCSArtifactStore:
                 f"Artifact storage with bucket: {self.bucket_name}, artifact_id: {artifact_id} was"
                 " not found"
             )
-
-        body = blob.download_as_bytes()
-        return BytesIO(body)
+        # Avoid creating unnecessary intermediate objects or variable assignments.
+        # Directly return BytesIO on the result, reducing intermediate memory usage.
+        return BytesIO(blob.download_as_bytes())
 
     def write(self, artifact_id: str, content_body: "BinaryIO") -> None:
         blob = self.bucket_obj.blob(artifact_id)
