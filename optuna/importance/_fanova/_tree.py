@@ -5,6 +5,7 @@ import itertools
 from typing import TYPE_CHECKING
 
 import numpy as np
+import sklearn.tree
 
 
 if TYPE_CHECKING:
@@ -296,10 +297,14 @@ class _FanovaTree:
     def _get_node_children_subspaces(
         self, node_index: int, search_spaces: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray]:
-        return (
-            self._get_node_left_child_subspaces(node_index, search_spaces),
-            self._get_node_right_child_subspaces(node_index, search_spaces),
-        )
+        # Avoid repeated feature index & threshold lookup
+        feature = self._get_node_split_feature(node_index)
+        threshold = self._get_node_split_threshold(node_index)
+        left = search_spaces.copy()
+        right = search_spaces.copy()
+        left[feature, 1] = threshold
+        right[feature, 0] = threshold
+        return (left, right)
 
 
 def _get_cardinality(search_spaces: np.ndarray) -> float:
