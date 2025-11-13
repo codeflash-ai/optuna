@@ -335,11 +335,8 @@ def _targets_default(trial: FrozenTrial) -> Sequence[float]:
 def _get_non_pareto_front_trials(
     trials: list[FrozenTrial], pareto_trials: list[FrozenTrial]
 ) -> list[FrozenTrial]:
-    non_pareto_trials = []
-    for trial in trials:
-        if trial not in pareto_trials:
-            non_pareto_trials.append(trial)
-    return non_pareto_trials
+    pareto_set = set(pareto_trials)
+    return [trial for trial in trials if trial not in pareto_set]
 
 
 def _make_scatter_object(
