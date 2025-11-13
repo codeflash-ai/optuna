@@ -97,22 +97,26 @@ def _get_hypervolume_history_info(
     # Only feasible trials are considered in hypervolume computation.
     trial_numbers = []
     hypervolume_values = []
-    best_trials_values_normalized: np.ndarray | None = None
+    best_trials_values_normalized: list[np.ndarray] = []
     hypervolume = 0.0
+    best_trials_values_normalized_arr: np.ndarray | None = None
+
     for trial in completed_trials:
         trial_numbers.append(trial.number)
 
         has_constraints = _CONSTRAINTS_KEY in trial.system_attrs
         if has_constraints:
             constraints_values = trial.system_attrs[_CONSTRAINTS_KEY]
-            if any(map(lambda x: x > 0.0, constraints_values)):
+            if any(x > 0.0 for x in constraints_values):
                 # The trial is infeasible.
                 hypervolume_values.append(hypervolume)
                 continue
 
         values_normalized = (signs * trial.values)[np.newaxis, :]
-        if best_trials_values_normalized is not None:
-            if (best_trials_values_normalized <= values_normalized).all(axis=1).any(axis=0):
+        if best_trials_values_normalized_arr is not None:
+            # Best trials are stored as numpy array, fast computation with new trial
+            # The trial is not on the Pareto front.
+            if (best_trials_values_normalized_arr <= values_normalized).all(axis=1).any():
                 # The trial is not on the Pareto front.
                 hypervolume_values.append(hypervolume)
                 continue
@@ -120,19 +124,32 @@ def _get_hypervolume_history_info(
         if (values_normalized > minimization_reference_point).any():
             hypervolume_values.append(hypervolume)
             continue
-        hypervolume += np.prod(minimization_reference_point - values_normalized)
-        if best_trials_values_normalized is None:
-            best_trials_values_normalized = values_normalized
+
+        prod_v = np.prod(minimization_reference_point - values_normalized)
+        hypervolume += prod_v
+        if best_trials_values_normalized_arr is None:
+            # Only first trial
+            best_trials_values_normalized.append(values_normalized)
+            best_trials_values_normalized_arr = np.vstack(best_trials_values_normalized)
         else:
-            limited_sols = np.maximum(best_trials_values_normalized, values_normalized)
+            # Use list for interim construction, convert to array only when needed
+            best_trials_values_normalized.append(values_normalized)
+            best_trials_values_normalized_arr = np.vstack(best_trials_values_normalized)
+            limited_sols = np.maximum(best_trials_values_normalized_arr[:-1], values_normalized)
             hypervolume -= compute_hypervolume(limited_sols, minimization_reference_point)
-            is_kept = (best_trials_values_normalized < values_normalized).any(axis=1)
-            best_trials_values_normalized = np.concatenate(
-                [best_trials_values_normalized[is_kept, :], values_normalized], axis=0
-            )
+            # Find all Pareto-optimal survivors, keep those and append new one
+            is_kept = (best_trials_values_normalized_arr[:-1] < values_normalized).any(axis=1)
+            # Prepare new survivor list: survivors + current trial
+            survivors = []
+            for idx, keep in enumerate(is_kept):
+                if keep:
+                    survivors.append(best_trials_values_normalized_arr[:-1][idx])
+            survivors.append(values_normalized)
+            best_trials_values_normalized = survivors
+            best_trials_values_normalized_arr = np.vstack(best_trials_values_normalized)
         hypervolume_values.append(hypervolume)
 
-    if best_trials_values_normalized is None:
+    if not best_trials_values_normalized:
         _logger.warning("Your study does not have any feasible trials.")
 
     return _HypervolumeHistoryInfo(trial_numbers, hypervolume_values)

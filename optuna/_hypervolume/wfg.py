@@ -151,15 +151,20 @@ def compute_hypervolume(
         return 0.0
 
     if not assume_pareto:
-        unique_lexsorted_loss_vals = np.unique(loss_vals, axis=0)
+        # Fast path: if already lexsorted on first column (common case in MO filtering)
+        is_lexsorted = (
+            loss_vals.shape[0] < 2 or np.all(loss_vals[1:, 0] >= loss_vals[:-1, 0])
+        )
+        if is_lexsorted:
+            unique_lexsorted_loss_vals = _fast_unique_rows_lexsorted(loss_vals)
+        else:
+            unique_lexsorted_loss_vals = np.unique(loss_vals, axis=0)
         on_front = _is_pareto_front(unique_lexsorted_loss_vals, assume_unique_lexsorted=True)
         sorted_pareto_sols = unique_lexsorted_loss_vals[on_front]
     else:
-        # NOTE(nabenabe): The result of this function does not change both by
-        # np.argsort(loss_vals[:, 0]) and np.unique(loss_vals, axis=0).
-        # But many duplications in loss_vals significantly slows down the function.
-        # TODO(nabenabe): Make an option to use np.unique.
-        sorted_pareto_sols = loss_vals[loss_vals[:, 0].argsort()]
+        sorted_idx = loss_vals[:, 0].argsort()
+        sorted_pareto_sols = loss_vals[sorted_idx]
+
 
     if reference_point.shape[0] == 2:
         hv = _compute_2d(sorted_pareto_sols, reference_point)
@@ -176,3 +181,14 @@ def compute_hypervolume(
     # NOTE(nabenabe): `nan` happens when inf - inf happens, but this is inf in hypervolume due to
     # the submodularity.
     return hv if np.isfinite(hv) else float("inf")
+
+
+def _fast_unique_rows_lexsorted(arr: np.ndarray) -> np.ndarray:
+    # arr must be 2D and lexsorted on first column (Pareto filtering precondition)
+    # Assumes float or int types and moderate array sizes.
+    if arr.shape[0] == 0:
+        return arr[:0]
+    # Unique rows: scan for adjacent differences
+    mask = np.ones(arr.shape[0], dtype=bool)
+    mask[1:] = np.any(arr[1:] != arr[:-1], axis=1)
+    return arr[mask]
