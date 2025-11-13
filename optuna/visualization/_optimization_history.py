@@ -58,7 +58,7 @@ def _get_optimization_history_info_list(
 
     info_list: list[_OptimizationHistoryInfo] = []
     for study in studies:
-        trials = study.get_trials()
+        trials = study.get_trials(deepcopy=False)
         label_name = target_name if len(studies) == 1 else f"{target_name} of {study.study_name}"
         values = []
         value_states = []
@@ -68,7 +68,8 @@ def _get_optimization_history_info_list(
                 value_states.append(_ValueState.Incomplete)
                 continue
             constraints = trial.system_attrs.get(_CONSTRAINTS_KEY)
-            if constraints is None or all([x <= 0.0 for x in constraints]):
+            # Use generator expression for all() instead of materializing full list.
+            if constraints is None or all(x <= 0.0 for x in constraints):
                 value_states.append(_ValueState.Feasible)
             else:
                 value_states.append(_ValueState.Infeasible)
@@ -81,7 +82,6 @@ def _get_optimization_history_info_list(
             # which direction is better.
             best_values_info: _ValuesInfo | None = None
         else:
-            feasible_best_values = []
             if study.direction == StudyDirection.MINIMIZE:
                 feasible_best_values = [
                     v if s == _ValueState.Feasible else float("inf")
@@ -134,8 +134,8 @@ def _get_optimization_history_info_list(
 
     def _aggregate(label_name: str, use_best_value: bool) -> tuple[list[int], _ValuesInfo]:
         # Calculate mean and std of values for each trial number.
-        values: list[list[float]] = [[] for _ in range(max_num_trial)]
-        states: list[list[_ValueState]] = [[] for _ in range(max_num_trial)]
+        values = [[] for _ in range(max_num_trial)]
+        states = [[] for _ in range(max_num_trial)]
         assert info_list is not None
         for trial_numbers, values_info, best_values_info in info_list:
             if use_best_value:
@@ -153,11 +153,12 @@ def _get_optimization_history_info_list(
         value_means: list[float] = []
         value_stds: list[float] = []
         for i in range(max_num_trial):
-            if len(states[i]) > 0 and _ValueState.Feasible in states[i]:
+            if states[i] and _ValueState.Feasible in states[i]:
                 value_states.append(_ValueState.Feasible)
                 trial_numbers_union.append(i)
-                value_means.append(np.mean(values[i]).item())
-                value_stds.append(np.std(values[i]).item())
+                arr = np.asarray(values[i])
+                value_means.append(arr.mean().item())
+                value_stds.append(arr.std().item())
             else:
                 value_states.append(_ValueState.Infeasible)
         return trial_numbers_union, _ValuesInfo(value_means, value_stds, label_name, value_states)
