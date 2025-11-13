@@ -391,13 +391,17 @@ class GrpcClientCache:
         with self.lock:
             self._read_trials_from_remote_storage(study_id)
             study = self.studies[study_id]
-            trials: dict[int, FrozenTrial] | list[FrozenTrial]
+
+            trials = study.trials
             if states is not None:
-                trials = {number: t for number, t in study.trials.items() if t.state in states}
+                # Avoid constructing an intermediate dict, use a generator expression for direct filtering and sorting
+                filtered = (t for t in trials.values() if t.state in states)
+                trials_list = sorted(filtered, key=lambda t: t.number)
             else:
-                trials = study.trials
-            trials = list(sorted(trials.values(), key=lambda t: t.number))
-            return trials
+                # Shortcut for no filtering: fetch all trials as a list and sort
+                # Reuse list object to avoid extra dict-copy
+                trials_list = sorted(trials.values(), key=lambda t: t.number)
+            return trials_list
 
     def _read_trials_from_remote_storage(self, study_id: int) -> None:
         if study_id not in self.studies:
@@ -419,9 +423,12 @@ class GrpcClientCache:
         if not res.trials:
             return
 
+        # Convert proto trials to FrozenTrial in a tight loop for better performance
+        _from_proto_trial = grpc_servicer._from_proto_trial
+        _add_trial_to_cache = self._add_trial_to_cache
         for trial_proto in res.trials:
-            trial = grpc_servicer._from_proto_trial(trial_proto)
-            self._add_trial_to_cache(study_id, trial)
+            trial = _from_proto_trial(trial_proto)
+            _add_trial_to_cache(study_id, trial)
 
     def _add_trial_to_cache(self, study_id: int, trial: FrozenTrial) -> None:
         study = self.studies[study_id]
