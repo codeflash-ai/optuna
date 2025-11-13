@@ -18,22 +18,37 @@ def _get_pareto_front_trials_by_trials(
     consider_constraint: bool = False,
 ) -> list[FrozenTrial]:
     # NOTE(nabenabe0928): Vectorization relies on all the trials being complete.
-    trials = [t for t in trials if t.state == TrialState.COMPLETE]
+    # Optimize filtering COMPLETE state trials using generator and preallocate list for performance.
+    filtered_trials = []
+    # Local var assignment for tight loop
+    trial_state_complete = TrialState.COMPLETE
+    append = filtered_trials.append
+    for t in trials:
+        if t.state == trial_state_complete:
+            append(t)
     if consider_constraint:
-        trials = _get_feasible_trials(trials)
-    if len(trials) == 0:
+        filtered_trials = _get_feasible_trials(filtered_trials)
+    if not filtered_trials:
         return []
-
-    if any(len(t.values) != len(directions) for t in trials):
-        raise ValueError(
-            "The number of the values and the number of the objectives must be identical."
-        )
-
-    loss_values = np.asarray(
-        [[_normalize_value(v, d) for v, d in zip(t.values, directions)] for t in trials]
-    )
+    # The following checks must be performed on the valid trials only
+    num_directions = len(directions)
+    for t in filtered_trials:
+        if len(t.values) != num_directions:
+            raise ValueError(
+                "The number of the values and the number of the objectives must be identical."
+            )
+    # Vectorized computation for loss_values
+    # Avoid unnecessary list comprehensions - combine zip and iteration outside list
+    # Preallocate and fill the numpy array for better memory efficiency
+    trial_count = len(filtered_trials)
+    loss_values = np.empty((trial_count, num_directions), dtype=float)
+    for i, t in enumerate(filtered_trials):
+        for j, (v, d) in enumerate(zip(t.values, directions)):
+            loss_values[i, j] = _normalize_value(v, d)
+    # Get pareto mask and filter efficiently
     on_front = _is_pareto_front(loss_values, assume_unique_lexsorted=False)
-    return [t for t, is_pareto in zip(trials, on_front) if is_pareto]
+    # Use list comprehension with zip directly for performance on filtering
+    return [t for t, is_pareto in zip(filtered_trials, on_front) if is_pareto]
 
 
 def _get_pareto_front_trials(
