@@ -18,26 +18,46 @@ def _solve_hssp_2d(
     assert rank_i_loss_vals.shape[-1] == 2 and subset_size <= rank_i_loss_vals.shape[0]
     n_trials = rank_i_loss_vals.shape[0]
     # rank_i_loss_vals is unique-lexsorted in solve_hssp.
-    sorted_indices = np.arange(rank_i_loss_vals.shape[0])
+
+    # Pre-allocate memory for all arrays needed.
+    sorted_indices = np.arange(n_trials)
     sorted_loss_vals = rank_i_loss_vals.copy()
-    # The diagonal points for each rectangular to calculate the hypervolume contributions.
-    rect_diags = np.repeat(reference_point[np.newaxis, :], n_trials, axis=0)
-    selected_indices = np.zeros(subset_size, dtype=int)
+    rect_diags = np.empty((n_trials, 2), dtype=reference_point.dtype)
+    rect_diags[:, 0] = reference_point[0]
+    rect_diags[:, 1] = reference_point[1]
+    selected_indices = np.empty(subset_size, dtype=int)
+
+    # Pre-allocate boolean keep array (over-allocated, views will be used)
+    keep = np.empty(n_trials, dtype=bool)
+
     for i in range(subset_size):
-        contribs = np.prod(rect_diags - sorted_loss_vals, axis=-1)
+        n_remain = n_trials - i
+        # Vectorized hypervolume contrib calc: (rect_diags - sorted_loss_vals).prod(-1)
+        np.subtract(rect_diags[:n_remain], sorted_loss_vals[:n_remain], out=rect_diags[:n_remain])
+        contribs = rect_diags[:n_remain, 0] * rect_diags[:n_remain, 1]
+        # Undo the subtract to restore rect_diags for next iteration
+        np.add(rect_diags[:n_remain], sorted_loss_vals[:n_remain], out=rect_diags[:n_remain])
+
         max_index = np.argmax(contribs)
         selected_indices[i] = rank_i_indices[sorted_indices[max_index]]
         loss_vals = sorted_loss_vals[max_index].copy()
 
-        keep = np.ones(n_trials - i, dtype=bool)
+        # Mark everything True except max_index, as keep
+        keep[:n_remain] = True
         keep[max_index] = False
-        # Remove the chosen point.
-        sorted_indices = sorted_indices[keep]
-        rect_diags = rect_diags[keep]
-        sorted_loss_vals = sorted_loss_vals[keep]
-        # Update the diagonal points for each hypervolume contribution calculation.
-        rect_diags[:max_index, 0] = np.minimum(loss_vals[0], rect_diags[:max_index, 0])
-        rect_diags[max_index:, 1] = np.minimum(loss_vals[1], rect_diags[max_index:, 1])
+
+        # Efficient slicing/view update, no copy
+        sorted_indices = sorted_indices[keep[:n_remain]]
+        rect_diags = rect_diags[keep[:n_remain]]
+        sorted_loss_vals = sorted_loss_vals[keep[:n_remain]]
+
+        # Update rect_diags "in-place" for remaining points (carefully: slices)
+        # range [:max_index] -- This only changes first column
+        if max_index > 0:
+            np.minimum(loss_vals[0], rect_diags[:max_index, 0], out=rect_diags[:max_index, 0])
+        # range [max_index:] -- This only changes second column
+        if max_index < rect_diags.shape[0]:
+            np.minimum(loss_vals[1], rect_diags[max_index:, 1], out=rect_diags[max_index:, 1])
 
     return selected_indices
 
