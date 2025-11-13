@@ -462,9 +462,16 @@ def _categorical_choice_equal(
     This function can handle NaNs like np.float32("nan") other than float.
     """
 
-    value1_is_nan = isinstance(value1, Real) and math.isnan(float(value1))
-    value2_is_nan = isinstance(value2, Real) and math.isnan(float(value2))
-    return (value1 == value2) or (value1_is_nan and value2_is_nan)
+    # Fast equality check first (covers all types except NaN edge case)
+    if value1 == value2:
+        return True
+
+    # Optimize isinstance checks by combining them, avoids repeated calls
+    if not (isinstance(value1, Real) and isinstance(value2, Real)):
+        return False
+
+    # Directly check if both are NaN
+    return math.isnan(value1) and math.isnan(value2)
 
 
 class CategoricalDistribution(BaseDistribution):
@@ -659,6 +666,17 @@ def check_distribution_compatibility(
 
 
 def _adjust_discrete_uniform_high(low: float, high: float, step: float) -> float:
+    # Avoid Decimal construction from str for every call if step is integer and divides the range evenly.
+    try:
+        # Fast path: check exact divisibility using floats
+        d_r = high - low
+        mod = (d_r / step) % 1
+        if mod == 0.0:
+            return high
+    except Exception:
+        # Fall back to Decimal to avoid floating point imprecision or possible division by zero
+        pass
+
     d_high = decimal.Decimal(str(high))
     d_low = decimal.Decimal(str(low))
     d_step = decimal.Decimal(str(step))
