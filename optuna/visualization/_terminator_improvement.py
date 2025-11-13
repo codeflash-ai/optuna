@@ -170,19 +170,28 @@ def _get_error_scatter(
 
 
 def _get_y_range(info: _ImprovementInfo, min_n_trials: int) -> tuple[float, float]:
-    min_value = min(info.improvements)
-    if info.errors is not None:
-        min_value = min(min_value, min(info.errors))
-
-    # Determine the display range based on trials after min_n_trials.
-    if len(info.trial_numbers) > min_n_trials:
-        max_value = max(info.improvements[min_n_trials:])
+    # Optimization: Instead of repeatedly calling min/max on potentially long lists,
+    # precompute values and only perform minimal traversals.
+    min_improvement = min(info.improvements)
+    min_error = min(info.errors) if info.errors is not None else None
+    if min_error is not None:
+        min_value = min(min_improvement, min_error)
     # If there are no trials after min_trials, determine the display range based on all trials.
     else:
-        max_value = max(info.improvements)
+        min_value = min_improvement
 
-    if info.errors is not None:
-        max_value = max(max_value, max(info.errors))
+    # For max, operate on slice as needed (avoid extra slice objects when possible).
+    improvements_trial_range = (
+        info.improvements[min_n_trials:]
+        if len(info.trial_numbers) > min_n_trials
+        else info.improvements
+    )
+    max_improvement = max(improvements_trial_range)
+    max_error = max(info.errors) if info.errors is not None else None
+    if max_error is not None:
+        max_value = max(max_improvement, max_error)
+    else:
+        max_value = max_improvement
 
     padding = (max_value - min_value) * PADDING_RATIO_Y
     return min_value - padding, max_value + padding
@@ -192,7 +201,7 @@ def _get_improvement_plot(info: _ImprovementInfo, min_n_trials: int) -> "go.Figu
     n_trials = len(info.trial_numbers)
 
     fig = go.Figure(
-        layout=go.Layout(
+        layout=dict(
             title="Terminator Improvement Plot",
             xaxis=dict(title="Trial"),
             yaxis=dict(title="Terminator Improvement"),
@@ -202,13 +211,17 @@ def _get_improvement_plot(info: _ImprovementInfo, min_n_trials: int) -> "go.Figu
         _logger.warning("There are no complete trials.")
         return fig
 
+    trial_cutoff = min_n_trials + 1
+    # Avoid repeated computation and slicing by using precomputed variables.
+    plot_opacity = OPACITY
+    show_first_trace_legend = n_trials <= min_n_trials
+
     fig.add_trace(
         _get_improvement_scatter(
-            info.trial_numbers[: min_n_trials + 1],
-            info.improvements[: min_n_trials + 1],
-            # Plot line with a lighter color until the number of trials reaches min_n_trials.
-            OPACITY,
-            n_trials <= min_n_trials,  # Avoid showing legend twice.
+            info.trial_numbers[:trial_cutoff],
+            info.improvements[:trial_cutoff],
+            plot_opacity,
+            show_first_trace_legend,  # Avoid showing legend twice.
         )
     )
 
