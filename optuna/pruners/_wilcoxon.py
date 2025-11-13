@@ -152,9 +152,13 @@ class WilcoxonPruner(BasePruner):
         if len(trial.intermediate_values) == 0:
             return False
 
-        steps, step_values = np.array(list(trial.intermediate_values.items())).T
+        # OPTIMIZATION: Only extract step and values arrays (avoid intermediate tuple/array)
+        keys_view = trial.intermediate_values.keys()
+        vals_view = trial.intermediate_values.values()
+        steps = np.fromiter(keys_view, dtype=float, count=len(trial.intermediate_values))
+        step_values = np.fromiter(vals_view, dtype=float, count=len(trial.intermediate_values))
 
-        if np.any(~np.isfinite(step_values)):
+        if not np.isfinite(step_values).all():
             warnings.warn(
                 f"The intermediate values of the current trial (trial {trial.number}) "
                 f"contain infinity/NaNs. WilcoxonPruner will not prune this trial."
@@ -174,9 +178,17 @@ class WilcoxonPruner(BasePruner):
             )
             return False
 
-        best_steps, best_step_values = np.array(list(best_trial.intermediate_values.items())).T
+        # OPTIMIZATION: Only extract step and values arrays
+        best_keys_view = best_trial.intermediate_values.keys()
+        best_vals_view = best_trial.intermediate_values.values()
+        best_steps = np.fromiter(
+            best_keys_view, dtype=float, count=len(best_trial.intermediate_values)
+        )
+        best_step_values = np.fromiter(
+            best_vals_view, dtype=float, count=len(best_trial.intermediate_values)
+        )
 
-        if np.any(~np.isfinite(best_step_values)):
+        if not np.isfinite(best_step_values).all():
             warnings.warn(
                 f"The intermediate values of the best trial (trial {best_trial.number}) "
                 f"contain infinity/NaNs. WilcoxonPruner will not prune the current trial."
@@ -196,20 +208,29 @@ class WilcoxonPruner(BasePruner):
 
         diff_values = step_values[idx1] - best_step_values[idx2]
 
-        if len(diff_values) < max(2, self._n_startup_steps):
+        min_steps = max(2, self._n_startup_steps)
+        if diff_values.shape[0] < min_steps:
             return False
+
+        # OPTIMIZATION: vectorized average_is_best computation; avoid repeated sum/len
+        steps_cnt = step_values.shape[0]
+        best_steps_cnt = best_step_values.shape[0]
+
+        step_sum = step_values.sum()
+        best_step_sum = best_step_values.sum()
+
+        step_avg = step_sum / steps_cnt
+        best_step_avg = best_step_sum / best_steps_cnt
 
         alt: Literal["less", "greater"]
         if study.direction == StudyDirection.MAXIMIZE:
             alt = "less"
-            average_is_best = sum(best_step_values) / len(best_step_values) <= sum(
-                step_values
-            ) / len(step_values)
+            average_is_best = best_step_avg <= step_avg
         else:
             alt = "greater"
-            average_is_best = sum(best_step_values) / len(best_step_values) >= sum(
-                step_values
-            ) / len(step_values)
+            average_is_best = best_step_avg >= step_avg
+
+        # We use zsplit to avoid the problem when all values are zero.
 
         # We use zsplit to avoid the problem when all values are zero.
         p = ss.wilcoxon(diff_values, alternative=alt, zero_method="zsplit").pvalue
