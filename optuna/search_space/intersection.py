@@ -17,19 +17,26 @@ def _calculate(
     search_space: dict[str, BaseDistribution] | None = None,
     cached_trial_number: int = -1,
 ) -> tuple[dict[str, BaseDistribution] | None, int]:
-    states_of_interest = [
-        optuna.trial.TrialState.COMPLETE,
-        optuna.trial.TrialState.WAITING,
-        optuna.trial.TrialState.RUNNING,
-    ]
 
     if include_pruned:
-        states_of_interest.append(optuna.trial.TrialState.PRUNED)
+        states_of_interest = (
+            optuna.trial.TrialState.COMPLETE,
+            optuna.trial.TrialState.WAITING,
+            optuna.trial.TrialState.RUNNING,
+            optuna.trial.TrialState.PRUNED,
+        )
+    else:
+        states_of_interest = (
+            optuna.trial.TrialState.COMPLETE,
+            optuna.trial.TrialState.WAITING,
+            optuna.trial.TrialState.RUNNING,
+        )
 
     next_cached_trial_number = -1
 
     for trial in reversed(trials):
-        if trial.state not in states_of_interest:
+        state = trial.state
+        if state not in states_of_interest:
             continue
 
         if next_cached_trial_number == -1:
@@ -38,19 +45,30 @@ def _calculate(
         if cached_trial_number > trial.number:
             break
 
-        if not trial.state.is_finished():
+        if not state.is_finished():
             next_cached_trial_number = trial.number
             continue
 
         if search_space is None:
-            search_space = copy.copy(trial.distributions)
+            # Only copy when search_space is first assigned:
+            search_space = trial.distributions.copy()
             continue
 
-        search_space = {
-            name: distribution
-            for name, distribution in search_space.items()
-            if trial.distributions.get(name) == distribution
-        }
+        # Instead of filtering the whole dict every time, use set intersection for keys first:
+        distributions = trial.distributions
+        # Build a list of keys to keep
+        keys_to_keep = []
+        for name, distribution in search_space.items():
+            try:
+                if distributions[name] == distribution:
+                    keys_to_keep.append(name)
+            except KeyError:
+                pass
+        if len(keys_to_keep) == len(search_space):
+            # No change, keep same object
+            continue
+        # Build new dict only if change detected
+        search_space = {name: search_space[name] for name in keys_to_keep}
 
     return search_space, next_cached_trial_number
 
@@ -147,5 +165,10 @@ def intersection_search_space(
 
     search_space, _ = _calculate(trials, include_pruned)
     search_space = search_space or {}
-    search_space = dict(sorted(search_space.items(), key=lambda x: x[0]))
+    # If already sorted or empty, return quickly
+    if len(search_space) < 2:
+        return search_space
+    # Use an optimized sort for a dict with string keys
+    items = search_space.items()
+    search_space = dict(sorted(items, key=lambda x: x[0]))
     return search_space
