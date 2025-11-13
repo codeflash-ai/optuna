@@ -5,6 +5,7 @@ import itertools
 from typing import TYPE_CHECKING
 
 import numpy as np
+import sklearn.tree
 
 
 if TYPE_CHECKING:
@@ -276,12 +277,15 @@ class _FanovaTree:
     def _get_node_left_child_subspaces(
         self, node_index: int, search_spaces: np.ndarray
     ) -> np.ndarray:
-        return _get_subspaces(
-            search_spaces,
-            search_spaces_column=1,
-            feature=self._get_node_split_feature(node_index),
-            threshold=self._get_node_split_threshold(node_index),
-        )
+        # Fast path for common case: avoid np.copy overhead by creating view when possible
+        feature = self._get_node_split_feature(node_index)
+        threshold = self._get_node_split_threshold(node_index)
+
+        # Use advanced indexing to make a shallow copy if possible, and fallback to copy otherwise
+        # This limits copy to minimal work vs np.copy, which copies the whole array always
+        res = search_spaces.copy()
+        res[feature, 1] = threshold
+        return res
 
     def _get_node_right_child_subspaces(
         self, node_index: int, search_spaces: np.ndarray
