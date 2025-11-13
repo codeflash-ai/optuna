@@ -195,13 +195,12 @@ class GPRegressor:
         cov_fx_fX = self.kernel(x_)
         cov_fx_fx = self.kernel_scale  # kernel(x, x) = kernel_scale
         mean = cov_fx_fX @ self._cov_Y_Y_inv_Y
-        # K @ inv(C) = V --> K = V @ C --> K = V @ L @ L.T
-        cov_fx_fX_cov_Y_Y_inv = torch.linalg.solve_triangular(
-            self._cov_Y_Y_chol,
-            torch.linalg.solve_triangular(self._cov_Y_Y_chol.T, cov_fx_fX, upper=True, left=False),
-            upper=False,
-            left=False,
-        )
+
+        # Use cholesky_solve for performance and stability
+        cov_fx_fX_cov_Y_Y_inv = torch.cholesky_solve(
+            cov_fx_fX.T, self._cov_Y_Y_chol
+        ).T
+
         var_ = (cov_fx_fx - torch.linalg.vecdot(cov_fx_fX, cov_fx_fX_cov_Y_Y_inv)).clamp_min_(0.0)
         return (mean.squeeze(0), var_.squeeze(0)) if is_single_point else (mean, var_)
 
