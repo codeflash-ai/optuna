@@ -462,9 +462,16 @@ def _categorical_choice_equal(
     This function can handle NaNs like np.float32("nan") other than float.
     """
 
-    value1_is_nan = isinstance(value1, Real) and math.isnan(float(value1))
-    value2_is_nan = isinstance(value2, Real) and math.isnan(float(value2))
-    return (value1 == value2) or (value1_is_nan and value2_is_nan)
+    # Fast equality check first (covers all types except NaN edge case)
+    if value1 == value2:
+        return True
+
+    # Optimize isinstance checks by combining them, avoids repeated calls
+    if not (isinstance(value1, Real) and isinstance(value2, Real)):
+        return False
+
+    # Directly check if both are NaN
+    return math.isnan(value1) and math.isnan(value2)
 
 
 class CategoricalDistribution(BaseDistribution):
@@ -638,19 +645,20 @@ def check_distribution_compatibility(
 
     """
 
-    if dist_old.__class__ != dist_new.__class__:
+    if type(dist_old) is not type(dist_new):
         raise ValueError("Cannot set different distribution kind to the same parameter name.")
 
-    if isinstance(dist_old, (FloatDistribution, IntDistribution)):
+    if type(dist_old) is FloatDistribution or type(dist_old) is IntDistribution:
         # For mypy.
-        assert isinstance(dist_new, (FloatDistribution, IntDistribution))
+        assert type(dist_new) is FloatDistribution or type(dist_new) is IntDistribution
 
         if dist_old.log != dist_new.log:
             raise ValueError("Cannot set different log configuration to the same parameter name.")
-
-    if not isinstance(dist_old, CategoricalDistribution):
         return
-    if not isinstance(dist_new, CategoricalDistribution):
+
+    if type(dist_old) is not CategoricalDistribution:
+        return
+    if type(dist_new) is not CategoricalDistribution:
         return
     if dist_old != dist_new:
         raise ValueError(
