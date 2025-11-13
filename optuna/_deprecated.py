@@ -12,6 +12,8 @@ from packaging import version
 from optuna._experimental import _get_docstring_indent
 from optuna._experimental import _validate_version
 
+_version_cache = {}
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -40,7 +42,20 @@ _DEPRECATION_WARNING_TEMPLATE = (
 
 
 def _validate_two_version(old_version: str, new_version: str) -> None:
-    if version.parse(old_version) > version.parse(new_version):
+    # Parse and cache version objects to avoid repeated expensive parsing.
+    if old_version in _version_cache:
+        old_v = _version_cache[old_version]
+    else:
+        old_v = version.parse(old_version)
+        _version_cache[old_version] = old_v
+
+    if new_version in _version_cache:
+        new_v = _version_cache[new_version]
+    else:
+        new_v = version.parse(new_version)
+        _version_cache[new_version] = new_v
+
+    if old_v > new_v:
         raise ValueError(
             "Invalid version relationship. The deprecated version must be smaller than "
             "the removed version, but (deprecated version, removed version) = ({}, {}) are "
