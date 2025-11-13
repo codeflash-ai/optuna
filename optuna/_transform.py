@@ -244,22 +244,18 @@ def _transform_numerical_param(
 ) -> float:
     d = distribution
 
-    if isinstance(d, CategoricalDistribution):
+    # Branch on type only once, avoid repeated type checks
+    # Use attribute access only once per branch
+    if isinstance(d, FloatDistribution) or isinstance(d, IntDistribution):
+        # Precompute attribute access
+        log_d = d.log
+        if log_d and transform_log:
+            return math.log(param)
+        return float(param)
+    elif isinstance(d, CategoricalDistribution):
         assert False, "Should not reach. Should be one-hot encoded."
-    elif isinstance(d, FloatDistribution):
-        if d.log:
-            trans_param = math.log(param) if transform_log else float(param)
-        else:
-            trans_param = float(param)
-    elif isinstance(d, IntDistribution):
-        if d.log:
-            trans_param = math.log(param) if transform_log else float(param)
-        else:
-            trans_param = float(param)
     else:
         assert False, "Should not reach. Unexpected distribution."
-
-    return trans_param
 
 
 def _untransform_numerical_param(
