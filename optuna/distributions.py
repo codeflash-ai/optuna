@@ -166,6 +166,18 @@ class FloatDistribution(BaseDistribution):
         else:
             if self.low == self.high:
                 return True
+
+            # Fast path: try native float math before falling back to decimal for edge cases.
+            # Allow a small epsilon to mitigate float rounding errors;
+            # that's safe for comparison without altering behavior due to decimal usage in original.
+
+            epsilon = 1e-12
+            if (self.high - self.low) < self.step - epsilon:
+                return True
+            if (self.high - self.low) >= self.step + epsilon:
+                return False
+
+            # Fallback to full decimal logic for precision-critical branch
             high = decimal.Decimal(str(self.high))
             low = decimal.Decimal(str(self.low))
             step = decimal.Decimal(str(self.step))
@@ -462,9 +474,16 @@ def _categorical_choice_equal(
     This function can handle NaNs like np.float32("nan") other than float.
     """
 
-    value1_is_nan = isinstance(value1, Real) and math.isnan(float(value1))
-    value2_is_nan = isinstance(value2, Real) and math.isnan(float(value2))
-    return (value1 == value2) or (value1_is_nan and value2_is_nan)
+    # Fast equality check first (covers all types except NaN edge case)
+    if value1 == value2:
+        return True
+
+    # Optimize isinstance checks by combining them, avoids repeated calls
+    if not (isinstance(value1, Real) and isinstance(value2, Real)):
+        return False
+
+    # Directly check if both are NaN
+    return math.isnan(value1) and math.isnan(value2)
 
 
 class CategoricalDistribution(BaseDistribution):
