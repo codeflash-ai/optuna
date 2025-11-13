@@ -398,20 +398,43 @@ def _to_proto_trial(trial: FrozenTrial) -> api_pb2.Trial:
 
 
 def _from_proto_trial(trial: api_pb2.Trial) -> FrozenTrial:
+    # Bind frequently used globals to locals for performance in tight loops
+    _json_to_distribution = json_to_distribution
+    _fast_datetime_parse_local = _fast_datetime_parse
+    _DATETIME_FORMAT_LOCAL = DATETIME_FORMAT
+    _json_loads = json.loads
+
     datetime_start = (
-        datetime.strptime(trial.datetime_start, DATETIME_FORMAT) if trial.datetime_start else None
+        _fast_datetime_parse_local(trial.datetime_start) if trial.datetime_start else None
     )
     datetime_complete = (
-        datetime.strptime(trial.datetime_complete, DATETIME_FORMAT)
+        _fast_datetime_parse_local(trial.datetime_complete)
         if trial.datetime_complete
         else None
     )
     distributions = {
-        key: json_to_distribution(value) for key, value in trial.distributions.items()
+        key: _json_to_distribution(value)
+        for key, value in trial.distributions.items()
     }
-    params = {}
-    for key, value in trial.params.items():
-        params[key] = distributions[key].to_external_repr(value)
+
+    # combine param assignment in dict comprehension, avoiding extra iteration
+    params = {
+        key: distributions[key].to_external_repr(value)
+        for key, value in trial.params.items()
+    }
+
+    # use map for json.loads in dict comprehensions for batch processing
+    user_attrs = dict(
+        zip(trial.user_attributes.keys(),
+            map(_json_loads, trial.user_attributes.values()))
+    )
+    system_attrs = dict(
+        zip(trial.system_attributes.keys(),
+            map(_json_loads, trial.system_attributes.values()))
+    )
+
+    intermediate_values = dict(trial.intermediate_values.items())
+
 
     return FrozenTrial(
         trial_id=trial.trial_id,
@@ -423,7 +446,14 @@ def _from_proto_trial(trial: api_pb2.Trial) -> FrozenTrial:
         datetime_complete=datetime_complete,
         params=params,
         distributions=distributions,
-        user_attrs={key: json.loads(value) for key, value in trial.user_attributes.items()},
-        system_attrs={key: json.loads(value) for key, value in trial.system_attributes.items()},
-        intermediate_values={step: value for step, value in trial.intermediate_values.items()},
+        user_attrs=user_attrs,
+        system_attrs=system_attrs,
+        intermediate_values=intermediate_values,
     )
+
+def _fast_datetime_parse(dt_str: str) -> datetime:
+    # Fast path for ISO format with microseconds (common use)
+    try:
+        return datetime.fromisoformat(dt_str)
+    except ValueError:
+        return datetime.strptime(dt_str, DATETIME_FORMAT)
