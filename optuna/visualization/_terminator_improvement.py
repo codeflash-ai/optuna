@@ -102,27 +102,32 @@ def _get_improvement_info(
     improvements = []
     errors = []
 
-    for trial in tqdm.tqdm(study.trials):
-        if trial.state == optuna.trial.TrialState.COMPLETE:
-            completed_trials.append(trial)
+    # Cache attributes to local variables for faster access in the inner loop.
+    trials = study.trials
+    direction = study.direction
+    TrialState_COMPLETE = optuna.trial.TrialState.COMPLETE
+    append_completed = completed_trials.append
+    append_trial_number = trial_numbers.append
+    append_improvement = improvements.append
+    append_error = errors.append
 
-        if len(completed_trials) == 0:
+    for trial in trials:
+        if trial.state == TrialState_COMPLETE:
+            append_completed(trial)
+        if not completed_trials:
             continue
-
-        trial_numbers.append(trial.number)
+        append_trial_number(trial.number)
 
         improvement = improvement_evaluator.evaluate(
-            trials=completed_trials, study_direction=study.direction
+            trials=completed_trials, study_direction=direction
         )
-        improvements.append(improvement)
+        append_improvement(improvement)
 
         if get_error:
-            error = error_evaluator.evaluate(
-                trials=completed_trials, study_direction=study.direction
-            )
-            errors.append(error)
+            error = error_evaluator.evaluate(trials=completed_trials, study_direction=direction)
+            append_error(error)
 
-    if len(errors) == 0:
+    if not errors:
         return _ImprovementInfo(
             trial_numbers=trial_numbers, improvements=improvements, errors=None
         )
