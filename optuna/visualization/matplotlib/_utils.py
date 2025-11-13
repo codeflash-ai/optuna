@@ -50,9 +50,20 @@ def _is_categorical(trials: list[FrozenTrial], param: str) -> bool:
 
 
 def _is_numerical(trials: list[FrozenTrial], param: str) -> bool:
-    return all(
-        (isinstance(t.params[param], int) or isinstance(t.params[param], float))
-        and not isinstance(t.params[param], bool)
-        for t in trials
-        if param in t.params
-    )
+    # Avoid repeated getattr and isinstance calls by localizing built-in functions
+    int_type = int
+    float_type = float
+    bool_type = bool
+
+    for t in trials:
+        params = t.params
+        if param in params:
+            value = params[param]
+            # Check type hierarchy directly and avoid unnecessary isinstance checks
+            value_type = type(value)
+            if (
+                value_type is int_type or value_type is float_type
+            ) and value_type is not bool_type:
+                continue
+            return False
+    return True
