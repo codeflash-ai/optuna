@@ -42,8 +42,8 @@ import numpy as np
 from optuna.samplers._tpe._erf import erf
 
 
-_norm_pdf_C = math.sqrt(2 * math.pi)
-_norm_pdf_logC = math.log(_norm_pdf_C)
+_norm_pdf_C = np.sqrt(2 * np.pi)
+_norm_pdf_logC = np.log(_norm_pdf_C)
 _ndtri_exp_approx_C = math.sqrt(3) / math.pi
 _log_2 = math.log(2)
 
@@ -107,7 +107,11 @@ def _log_ndtr(a: np.ndarray) -> np.ndarray:
 
 
 def _norm_logpdf(x: np.ndarray) -> np.ndarray:
-    return -(x**2) / 2.0 - _norm_pdf_logC
+    # Accelerate element-wise calculation using np.square and always float dtype.
+    # x may already be np.float64, but we coerce for performance safety.
+    # Remove Python float division and use np arrays.
+    x = np.asarray(x, dtype=np.float64)
+    return -np.square(x) / 2.0 - _norm_pdf_logC
 
 
 def _log_gauss_mass(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -115,37 +119,40 @@ def _log_gauss_mass(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
     # Calculations in right tail are inaccurate, so we'll exploit the
     # symmetry and work only in the left tail
+    # Use np.asarray to ensure contiguous arrays; improves indexing performance.
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+
+    # Vectorized logical masks (all np.ndarray, no Python bool indexing)
     case_left = b <= 0
     case_right = a > 0
     case_central = ~(case_left | case_right)
 
-    def mass_case_left(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        return _log_diff(_log_ndtr(b), _log_ndtr(a))
+    # Preallocate output (complex128 for stable calculation, matches original)
+    out = np.full(a.shape, np.nan, dtype=np.complex128)
 
-    def mass_case_right(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        return mass_case_left(-b, -a)
+    # All branches handled using np.flatnonzero and np.take for indexing
+    idx_left = np.flatnonzero(case_left)
+    if idx_left.size:
+        a_left = np.take(a, idx_left)
+        b_left = np.take(b, idx_left)
+        out[idx_left] = _log_diff(_log_ndtr(b_left), _log_ndtr(a_left))
 
-    def mass_case_central(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        # Previously, this was implemented as:
-        # left_mass = mass_case_left(a, 0)
-        # right_mass = mass_case_right(0, b)
-        # return _log_sum(left_mass, right_mass)
-        # Catastrophic cancellation occurs as np.exp(log_mass) approaches 1.
-        # Correct for this with an alternative formulation.
-        # We're not concerned with underflow here: if only one term
-        # underflows, it was insignificant; if both terms underflow,
-        # the result can't accurately be represented in logspace anyway
-        # because sc.log1p(x) ~ x for small x.
-        return np.log1p(-_ndtr(a) - _ndtr(-b))
+    idx_right = np.flatnonzero(case_right)
+    if idx_right.size:
+        a_right = np.take(a, idx_right)
+        b_right = np.take(b, idx_right)
+        # Exploit symmetry, exactly as original
+        out[idx_right] = _log_diff(_log_ndtr(-a_right), _log_ndtr(-b_right))
 
-    # _lazyselect not working; don't care to debug it
-    out = np.full_like(a, fill_value=np.nan, dtype=np.complex128)
-    if (a_left := a[case_left]).size:
-        out[case_left] = mass_case_left(a_left, b[case_left])
-    if (a_right := a[case_right]).size:
-        out[case_right] = mass_case_right(a_right, b[case_right])
-    if (a_central := a[case_central]).size:
-        out[case_central] = mass_case_central(a_central, b[case_central])
+    idx_central = np.flatnonzero(case_central)
+    if idx_central.size:
+        a_central = np.take(a, idx_central)
+        b_central = np.take(b, idx_central)
+        # Numerically safe central formula as originally described
+        out[idx_central] = np.log1p(-_ndtr(a_central) - _ndtr(-b_central))
+
+    # Discard ~0j
     return np.real(out)  # discard ~0j
 
 
@@ -286,8 +293,27 @@ def logpdf(
     loc: np.ndarray | float = 0,
     scale: np.ndarray | float = 1,
 ) -> np.ndarray:
-    x = (x - loc) / scale
-    x, a, b = np.atleast_1d(x, a, b)
-    out = _norm_logpdf(x) - _log_gauss_mass(a, b) - np.log(scale)
+    # Convert everything to at least 1d arrays; avoid excessive object creation.
+    x, a, b = np.atleast_1d((x - loc) / scale), np.atleast_1d(a), np.atleast_1d(b)
+
+    # Broadcast shapes only once for x, a, b (performance critical)
     x, a, b = np.broadcast_arrays(x, a, b)
-    return np.select([a == b, (x < a) | (x > b)], [np.nan, -np.inf], default=out)
+    # Precompute scale log for all elements for efficiency
+    if np.shape(scale) == () and isinstance(scale, (float, int)):
+        log_scale = np.log(scale)
+    else:
+        scale_arr = np.broadcast_to(scale, x.shape)
+        log_scale = np.log(scale_arr)
+
+    # Compute out using only x, a, b, scale; no redundant np.atleast_1d
+    out = _norm_logpdf(x) - _log_gauss_mass(a, b) - log_scale
+
+    # Use vectorized masking to fill nan/-inf results, avoid np.select for output assignment
+    mask_nan = a == b
+    mask_neginf = (x < a) | (x > b)
+    result = np.copy(out)
+    # nan assignments
+    result[mask_nan] = np.nan
+    # -inf assignments
+    result[mask_neginf & ~mask_nan] = -np.inf
+    return result
