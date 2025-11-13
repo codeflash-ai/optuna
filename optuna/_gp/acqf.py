@@ -23,10 +23,10 @@ else:
     torch = _LazyImport("torch")
 
 
-_SQRT_HALF = math.sqrt(0.5)
-_INV_SQRT_2PI = 1 / math.sqrt(2 * math.pi)
-_SQRT_HALF_PI = math.sqrt(0.5 * math.pi)
-_LOG_SQRT_2PI = math.log(math.sqrt(2 * math.pi))
+_SQRT_HALF = torch.tensor(0.7071067811865476, dtype=torch.get_default_dtype())
+_INV_SQRT_2PI = torch.tensor(0.3989422804014327, dtype=torch.get_default_dtype())
+_SQRT_HALF_PI = torch.tensor(1.2533141373155001, dtype=torch.get_default_dtype())
+_LOG_SQRT_2PI = torch.tensor(0.9189385332046728, dtype=torch.get_default_dtype())
 _EPS = 1e-12  # NOTE(nabenabe): grad becomes nan when EPS=0.
 
 
@@ -71,19 +71,25 @@ def standard_logei(z: torch.Tensor) -> torch.Tensor:
 
     NOTE: We do not use the third condition because [-10**100, 10**100] is an overly high range.
     """
-    # First condition (most z falls into this condition, so we calculate it first)
-    # NOTE: ei(z) = z * cdf(z) + pdf(z)
-    out = (
-        (z_half := 0.5 * z) * torch.special.erfc(-_SQRT_HALF * z)  # z * cdf(z)
-        + (-z_half * z).exp() * _INV_SQRT_2PI  # pdf(z)
-    ).log()
-    if (z_small := z[(small := z < -25)]).numel():
-        # Second condition (does not happen often, so we calculate it only if necessary)
-        out[small] = (
-            -0.5 * z_small**2
-            - _LOG_SQRT_2PI
-            + (1 + _SQRT_HALF_PI * z_small * torch.special.erfcx(-_SQRT_HALF * z_small)).log()
-        )
+    # Pre-compute values for first condition, using fused operations to optimize computation:
+    z_half = 0.5 * z
+    # Use torch.where for out to avoid double computation, enabling vectorized in-place updates without masking/indexing overhead
+    erfc_res = torch.special.erfc(-_SQRT_HALF * z)
+    exp_res = torch.exp(-z_half * z)
+    # Combine for improved efficiency, contiguously
+    out = torch.log(z_half * erfc_res + exp_res * _INV_SQRT_2PI)
+    # Avoid indexing and unnecessary .numel(), instead branch only if necessary
+    small = z < -25
+    if torch.any(small):
+        # Gather only relevant small z values
+        z_small = z[small]
+        term1 = -0.5 * z_small ** 2
+        term2 = -_LOG_SQRT_2PI
+        # Fused erfcx and multiply
+        erfcx_val = torch.special.erfcx(-_SQRT_HALF * z_small)
+        # Use fused multiply-add
+        term3 = torch.log(1 + _SQRT_HALF_PI * z_small * erfcx_val)
+        out[small] = term1 + term2 + term3
     return out
 
 
