@@ -5,6 +5,7 @@ import itertools
 from typing import TYPE_CHECKING
 
 import numpy as np
+import sklearn.tree
 
 
 if TYPE_CHECKING:
@@ -66,8 +67,8 @@ class _FanovaTree:
             value, weight = self._get_marginalized_statistics(sample)
             weight *= float(np.prod(sizes))
 
-            values = np.append(values, value)
-            weights = np.append(weights, weight)
+            values.append(value)
+            weights.append(weight)
 
         weights = np.asarray(weights)
         values = np.asarray(values)
@@ -85,7 +86,11 @@ class _FanovaTree:
 
         # Reduce search space cardinalities to 1 for non-active features.
         search_spaces = self._search_spaces.copy()
-        search_spaces[marginalized_features] = [0.0, 1.0]
+        # Avoid assignment with object arrays: use direct advanced indexing
+        search_spaces[marginalized_features, 0] = 0.0
+        search_spaces[marginalized_features, 1] = 1.0
+
+        # Start from the root and traverse towards the leafs.
 
         # Start from the root and traverse towards the leafs.
         active_nodes = [0]
@@ -94,7 +99,7 @@ class _FanovaTree:
         node_indices = []
         active_leaf_search_spaces = []
 
-        while len(active_nodes) > 0:
+        while active_nodes:
             node_index = active_nodes.pop()
             search_spaces = active_search_spaces.pop()
 
@@ -119,8 +124,9 @@ class _FanovaTree:
                     continue
 
                 # If subtree starting from node splits on an active feature, push both child nodes.
-                # Here, we use `any` for list because `ndarray.any` is slow.
-                if any(self._subtree_active_features[node_index][active_features].tolist()):
+                active_feats = self._subtree_active_features[node_index][active_features]
+                # Use .any(axis=None) to avoid list conversion overhead
+                if active_feats.any():
                     for child_node_index in self._get_node_children(node_index):
                         active_nodes.append(child_node_index)
                         active_search_spaces.append(search_spaces)
@@ -130,10 +136,19 @@ class _FanovaTree:
             node_indices.append(node_index)
             active_leaf_search_spaces.append(search_spaces)
 
-        statistics = self._statistics[node_indices]
-        values = statistics[:, 0]
-        weights = statistics[:, 1]
-        active_features_cardinalities = _get_cardinality_batched(active_leaf_search_spaces)
+        if len(node_indices) == 1:
+            statistics = self._statistics[node_indices[0]]
+            values = statistics[0:1]
+            weights = statistics[1:2]
+            active_features_cardinalities = np.array(
+                [_get_cardinality_batched([active_leaf_search_spaces[0]])[0]]
+            )
+        else:
+            statistics = self._statistics[node_indices]
+            values = statistics[:, 0]
+            weights = statistics[:, 1]
+            active_features_cardinalities = _get_cardinality_batched(active_leaf_search_spaces)
+
         weights = weights / active_features_cardinalities
 
         value = np.average(values, weights=weights)
