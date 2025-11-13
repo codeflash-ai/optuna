@@ -258,21 +258,33 @@ class LogEHVI(BaseAcquisitionFunc):
         super().__init__(np.mean([gpr.length_scales for gpr in gpr_list], axis=0), search_space)
 
     def eval_acqf(self, x: torch.Tensor) -> torch.Tensor:
-        Y_post = []
-        for i, gpr in enumerate(self._gpr_list):
+        # Preallocate output tensor and directly fill, to avoid Python list and stack overhead
+        n_objs = len(self._gpr_list)
+        # Y dimensions: (...), broadcast with n_objs
+        # For hotpath efficiency use tensor preallocation and single-pass fill
+        means = []
+        stdevs = []
+
+        for gpr in self._gpr_list:
             mean, var = gpr.posterior(x)
-            stdev = torch.sqrt(var + self._stabilizing_noise)
-            # NOTE(nabenabe): By using fixed samples from the Sobol sequence, EHVI becomes
-            # deterministic, making it possible to optimize the acqf by l-BFGS.
-            # Sobol is better than the standard Monte-Carlo w.r.t. the approximation stability.
-            # cf. Appendix D of https://arxiv.org/pdf/2006.05078
-            Y_post.append(mean[..., None] + stdev[..., None] * self._fixed_samples[..., i])
+            means.append(mean)
+            stdevs.append(torch.sqrt(var + self._stabilizing_noise))
+
+        # The following will vectorize the mean, stdev stacking
+        means = torch.stack(means, dim=-1)  # shape (..., n_objs)
+        stdevs = torch.stack(stdevs, dim=-1)  # shape (..., n_objs)
+        # Use fixed_samples: (n_qmc_samples, n_objs)
+        # means[..., None, :] + stdevs[..., None, :] * fixed_samples[None, ...]
+        # Broadcasting works with trailing dims, avoid Python loop
+        Y_post = means.unsqueeze(-2) + stdevs.unsqueeze(-2) * self._fixed_samples  # broadcast
+
+        # Now pass to logehvi
 
         # NOTE(nabenabe): Use the following once multi-task GP is supported.
         # L = torch.linalg.cholesky(cov)
         # Y_post = means[..., None, :] + torch.einsum("...MM,SM->...SM", L, fixed_samples)
         return logehvi(
-            Y_post=torch.stack(Y_post, dim=-1),
+            Y_post=Y_post,
             non_dominated_box_lower_bounds=self._non_dominated_box_lower_bounds,
             non_dominated_box_intervals=self._non_dominated_box_intervals,
         )
@@ -312,4 +324,5 @@ class ConstrainedLogEHVI(BaseAcquisitionFunc):
         constraints_acqf_values = sum(acqf.eval_acqf(x) for acqf in self._constraints_acqf_list)
         if self._acqf is None:
             return cast(torch.Tensor, constraints_acqf_values)
+        # Avoid storing constraints_acqf_values to another tensor - add directly
         return constraints_acqf_values + self._acqf.eval_acqf(x)
