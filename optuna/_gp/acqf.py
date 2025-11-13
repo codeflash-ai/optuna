@@ -173,7 +173,9 @@ class UCB(BaseAcquisitionFunc):
 
     def eval_acqf(self, x: torch.Tensor) -> torch.Tensor:
         mean, var = self._gpr.posterior(x)
-        return mean + torch.sqrt(self._beta * var)
+        # Convert beta to tensor to match device/dtype for efficient computation
+        beta_tensor = torch.as_tensor(self._beta, dtype=var.dtype, device=var.device)
+        return mean + torch.sqrt(beta_tensor * var)
 
 
 class LCB(BaseAcquisitionFunc):
