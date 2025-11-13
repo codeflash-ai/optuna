@@ -462,9 +462,16 @@ def _categorical_choice_equal(
     This function can handle NaNs like np.float32("nan") other than float.
     """
 
-    value1_is_nan = isinstance(value1, Real) and math.isnan(float(value1))
-    value2_is_nan = isinstance(value2, Real) and math.isnan(float(value2))
-    return (value1 == value2) or (value1_is_nan and value2_is_nan)
+    # Fast equality check first (covers all types except NaN edge case)
+    if value1 == value2:
+        return True
+
+    # Optimize isinstance checks by combining them, avoids repeated calls
+    if not (isinstance(value1, Real) and isinstance(value2, Real)):
+        return False
+
+    # Directly check if both are NaN
+    return math.isnan(value1) and math.isnan(value2)
 
 
 class CategoricalDistribution(BaseDistribution):
@@ -712,38 +719,37 @@ def _convert_old_distribution_to_new_distribution(
 ) -> BaseDistribution:
     new_distribution: BaseDistribution
 
-    # Float distributions.
-    if isinstance(distribution, UniformDistribution):
+    dist_type = type(distribution)
+    # Fast type comparisons and local variable assignment for constructors
+    if dist_type is UniformDistribution:
         new_distribution = FloatDistribution(
             low=distribution.low,
             high=distribution.high,
             log=False,
             step=None,
         )
-    elif isinstance(distribution, LogUniformDistribution):
+    elif dist_type is LogUniformDistribution:
         new_distribution = FloatDistribution(
             low=distribution.low,
             high=distribution.high,
             log=True,
             step=None,
         )
-    elif isinstance(distribution, DiscreteUniformDistribution):
+    elif dist_type is DiscreteUniformDistribution:
         new_distribution = FloatDistribution(
             low=distribution.low,
             high=distribution.high,
             log=False,
             step=distribution.q,
         )
-
-    # Integer distributions.
-    elif isinstance(distribution, IntUniformDistribution):
+    elif dist_type is IntUniformDistribution:
         new_distribution = IntDistribution(
             low=distribution.low,
             high=distribution.high,
             log=False,
             step=distribution.step,
         )
-    elif isinstance(distribution, IntLogUniformDistribution):
+    elif dist_type is IntLogUniformDistribution:
         new_distribution = IntDistribution(
             low=distribution.low,
             high=distribution.high,
@@ -755,7 +761,7 @@ def _convert_old_distribution_to_new_distribution(
     else:
         new_distribution = distribution
 
-    if new_distribution != distribution and not suppress_warning:
+    if new_distribution is not distribution and not suppress_warning:
         message = (
             f"{distribution} is deprecated and internally converted to"
             f" {new_distribution}. See https://github.com/optuna/optuna/issues/2941."
