@@ -462,9 +462,16 @@ def _categorical_choice_equal(
     This function can handle NaNs like np.float32("nan") other than float.
     """
 
-    value1_is_nan = isinstance(value1, Real) and math.isnan(float(value1))
-    value2_is_nan = isinstance(value2, Real) and math.isnan(float(value2))
-    return (value1 == value2) or (value1_is_nan and value2_is_nan)
+    # Fast equality check first (covers all types except NaN edge case)
+    if value1 == value2:
+        return True
+
+    # Optimize isinstance checks by combining them, avoids repeated calls
+    if not (isinstance(value1, Real) and isinstance(value2, Real)):
+        return False
+
+    # Directly check if both are NaN
+    return math.isnan(value1) and math.isnan(value2)
 
 
 class CategoricalDistribution(BaseDistribution):
@@ -503,21 +510,32 @@ class CategoricalDistribution(BaseDistribution):
 
         self.choices = tuple(choices)
 
+        # Optimization: Build dictionary for fast exact-value-to-index mapping (excluding nan).
+        # To preserve original bug/quirk about True/1/1.0: duplicate values are allowed so use leftmost only.
+        # This is safe since self.choices is never mutated.
+        self._choices_value_to_index = {}
+        for idx, val in enumerate(self.choices):
+            # Only map unambiguous values (i.e. not NaN) for exact lookup
+            # We want the same behavior as .index() for exact matches
+            # math.isnan throws for non-Real, but those cannot be NaN
+            # For Real, skip nan (since nan != nan)
+            if isinstance(val, Real):
+                if math.isnan(val):
+                    continue
+            if val not in self._choices_value_to_index:
+                self._choices_value_to_index[val] = idx
+
     def to_external_repr(self, param_value_in_internal_repr: float) -> CategoricalChoiceType:
         return self.choices[int(param_value_in_internal_repr)]
 
     def to_internal_repr(self, param_value_in_external_repr: CategoricalChoiceType) -> float:
-        try:
-            # NOTE(nabenabe): With this implementation, we cannot distinguish some values
-            # such as True and 1, or 1.0 and 1. For example, if choices=[True, 1] and external_repr
-            # is 1, this method wrongly returns 0 instead of 1. However, we decided to accept this
-            # bug for such exceptional choices for less complexity and faster processing.
-            return self.choices.index(param_value_in_external_repr)
-        except ValueError:  # ValueError: param_value_in_external_repr is not in choices.
-            # ValueError also happens if external_repr is nan or includes precision error in float.
-            for index, choice in enumerate(self.choices):
-                if _categorical_choice_equal(param_value_in_external_repr, choice):
-                    return index
+        idx = self._choices_value_to_index.get(param_value_in_external_repr, None)
+        if idx is not None:
+            return idx
+
+        for index, choice in enumerate(self.choices):
+            if _categorical_choice_equal(param_value_in_external_repr, choice):
+                return index
 
         raise ValueError(f"'{param_value_in_external_repr}' not in {self.choices}.")
 
