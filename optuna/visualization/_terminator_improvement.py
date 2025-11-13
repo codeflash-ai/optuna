@@ -97,39 +97,44 @@ def _get_improvement_info(
         else:
             error_evaluator = CrossValidationErrorEvaluator()
 
+
+    # Filter all completed trials at once for efficiency
+    completed_trials = [trial for trial in study.trials if trial.state == optuna.trial.TrialState.COMPLETE]
+    n = len(completed_trials)
+    if n == 0:
+        return _ImprovementInfo(trial_numbers=[], improvements=[], errors=None if not get_error else [])
+
     trial_numbers = []
-    completed_trials = []
     improvements = []
-    errors = []
+    errors = [] if get_error else None
 
-    for trial in tqdm.tqdm(study.trials):
+    # Prepare a map: trial number to index for completed trials for fast lookup
+    completed_numbers_set = set(trial.number for trial in completed_trials)
+    # Precompute running completed count for each trial position
+    running_completed = []
+    count = 0
+    for trial in study.trials:
         if trial.state == optuna.trial.TrialState.COMPLETE:
-            completed_trials.append(trial)
+            count += 1
+        running_completed.append(count)
 
-        if len(completed_trials) == 0:
+    for idx, trial in enumerate(study.trials):
+        if trial.number not in completed_numbers_set or running_completed[idx] == 0:
             continue
 
         trial_numbers.append(trial.number)
-
-        improvement = improvement_evaluator.evaluate(
-            trials=completed_trials, study_direction=study.direction
-        )
+        upto_completed = completed_trials[:running_completed[idx]]
+        improvement = improvement_evaluator.evaluate(trials=upto_completed, study_direction=study.direction)
         improvements.append(improvement)
 
         if get_error:
-            error = error_evaluator.evaluate(
-                trials=completed_trials, study_direction=study.direction
-            )
+            error = error_evaluator.evaluate(trials=upto_completed, study_direction=study.direction)
             errors.append(error)
 
-    if len(errors) == 0:
-        return _ImprovementInfo(
-            trial_numbers=trial_numbers, improvements=improvements, errors=None
-        )
+    if errors is None or len(errors) == 0:
+        return _ImprovementInfo(trial_numbers=trial_numbers, improvements=improvements, errors=None)
     else:
-        return _ImprovementInfo(
-            trial_numbers=trial_numbers, improvements=improvements, errors=errors
-        )
+        return _ImprovementInfo(trial_numbers=trial_numbers, improvements=improvements, errors=errors)
 
 
 def _get_improvement_scatter(

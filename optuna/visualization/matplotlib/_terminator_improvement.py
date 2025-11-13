@@ -16,6 +16,10 @@ if _imports.is_successful():
     from optuna.visualization.matplotlib._matplotlib_imports import Axes
     from optuna.visualization.matplotlib._matplotlib_imports import plt
 
+_cmap = plt.get_cmap("tab10")
+
+_ggplot_applied = False
+
 _logger = get_logger(__name__)
 
 
@@ -74,13 +78,11 @@ def plot_terminator_improvement(
 def _get_improvement_plot(info: _ImprovementInfo, min_n_trials: int) -> "Axes":
     n_trials = len(info.trial_numbers)
 
-    # Set up the graph style.
-    plt.style.use("ggplot")  # Use ggplot style sheet for similar outputs to plotly.
+    _ensure_ggplot()
     _, ax = plt.subplots()
     ax.set_title("Terminator Improvement Plot")
     ax.set_xlabel("Trial")
     ax.set_ylabel("Terminator Improvement")
-    cmap = plt.get_cmap("tab10")  # Use tab10 colormap for similar outputs to plotly.
 
     if n_trials == 0:
         _logger.warning("There are no complete trials.")
@@ -90,7 +92,7 @@ def _get_improvement_plot(info: _ImprovementInfo, min_n_trials: int) -> "Axes":
         info.trial_numbers[: min_n_trials + 1],
         info.improvements[: min_n_trials + 1],
         marker="o",
-        color=cmap(0),
+        color=_cmap(0),
         alpha=ALPHA,
         label="Terminator Improvement" if n_trials <= min_n_trials else None,
     )
@@ -100,7 +102,7 @@ def _get_improvement_plot(info: _ImprovementInfo, min_n_trials: int) -> "Axes":
             info.trial_numbers[min_n_trials:],
             info.improvements[min_n_trials:],
             marker="o",
-            color=cmap(0),
+            color=_cmap(0),
             label="Terminator Improvement",
         )
 
@@ -109,9 +111,16 @@ def _get_improvement_plot(info: _ImprovementInfo, min_n_trials: int) -> "Axes":
             info.trial_numbers,
             info.errors,
             marker="o",
-            color=cmap(3),
+            color=_cmap(3),
             label="Error",
         )
     ax.legend()
     ax.set_ylim(_get_y_range(info, min_n_trials))
     return ax
+
+
+def _ensure_ggplot():
+    global _ggplot_applied
+    if not _ggplot_applied:
+        plt.style.use("ggplot")
+        _ggplot_applied = True
