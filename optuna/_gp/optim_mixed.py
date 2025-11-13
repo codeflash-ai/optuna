@@ -56,9 +56,9 @@ def _gradient_ascent_batched(
     def negative_acqf_with_grad(
         scaled_x: np.ndarray, fixed_params: list[np.ndarray]
     ) -> tuple[np.ndarray, np.ndarray]:
-        next_params = np.array(fixed_params)  # (B, dim)
-        # Scale back to the original domain, i.e. [0, 1], from [0, 1/s].
-        assert scaled_x.ndim == 2 and next_params.ndim == 2
+        # Use more efficient ndarray assignment rather than building with np.array(list).
+        next_params = np.array(fixed_params, copy=True)  # (B, dim)
+        # Efficiently assign scaled_x inplace rather than repeated slicing.
         next_params[:, continuous_indices] = scaled_x * lengthscales
         # NOTE(Kaichi-Irie): If fvals.numel() > 1, backward() cannot be computed, so we sum up.
         x_tensor = torch.from_numpy(next_params).requires_grad_(True)
@@ -70,11 +70,15 @@ def _gradient_ascent_batched(
         # Let the scaled acqf be g(x) and the acqf be f(sx), then dg/dx = df/dx * s.
         return neg_fvals_, grads[:, continuous_indices] * lengthscales
 
+
+    # Pass a copy ONCE rather than allocating a list for each batch internally.
+    # This reduces per-call list overhead since .copy() is a full ndarray.
+    fixed_params_batched = initial_params_batched.copy()
     with single_blas_thread_if_scipy_v1_15_or_newer():
         scaled_cont_xs_opt, neg_fvals_opt, n_iterations = batched_lbfgsb.batched_lbfgsb(
             func_and_grad=negative_acqf_with_grad,
             x0_batched=initial_params_batched[:, continuous_indices] / lengthscales,
-            batched_args=([param for param in initial_params_batched.copy()],),
+            batched_args=(fixed_params_batched,),
             bounds=[(0, 1 / s) for s in lengthscales],
             pgtol=math.sqrt(tol),
             max_iters=200,
@@ -242,31 +246,45 @@ def local_search_mixed_batched(
         np.min(np.diff(choices), initial=np.inf) / 4
         for choices in choices_of_discrete_params
     ]
-    best_fvals = acqf.eval_acqf_no_grad((best_xs := xs0.copy()))
+    best_xs = xs0.copy()
+    best_fvals = acqf.eval_acqf_no_grad(best_xs)
     CONTINUOUS = -1
     last_changed_dims = np.full(len(best_xs), CONTINUOUS, dtype=int)
     remaining_inds = np.arange(len(best_xs))
     for _ in range(max_iter):
-        best_xs[remaining_inds], best_fvals[remaining_inds], updated = _gradient_ascent_batched(
-            acqf, best_xs[remaining_inds], best_fvals[remaining_inds], cont_inds, lengthscales, tol
+        # Only optimize remaining indices.
+        current_indices = remaining_inds
+        if current_indices.size == 0:
+            return best_xs, best_fvals
+        # Gradient Ascent step
+        batch_xs, batch_fvals, updated = _gradient_ascent_batched(
+            acqf, best_xs[current_indices], best_fvals[current_indices],
+            cont_inds, lengthscales, tol
         )
-        last_changed_dims = np.where(updated, CONTINUOUS, last_changed_dims)
+        best_xs[current_indices] = batch_xs
+        best_fvals[current_indices] = batch_fvals
+        last_changed_dims[current_indices] = np.where(updated, CONTINUOUS, last_changed_dims[current_indices])
+        # Discrete dimension update
         for i, choices, xtol in zip(discrete_indices, choices_of_discrete_params, discrete_xtols):
-            last_changed_dims = last_changed_dims[~(is_converged := last_changed_dims == i)]
-            remaining_inds = remaining_inds[~is_converged]
-            if remaining_inds.size == 0:
+            is_converged = last_changed_dims[current_indices] == i
+            unconverged_mask = ~is_converged
+            prev_indices = current_indices
+            current_indices = current_indices[unconverged_mask]
+            last_changed_dims = last_changed_dims[unconverged_mask]
+            if current_indices.size == 0:
                 return best_xs, best_fvals
-            best_xs[remaining_inds], best_fvals[remaining_inds], updated = (
-                _local_search_discrete_batched(
-                    acqf, best_xs[remaining_inds], best_fvals[remaining_inds], i, choices, xtol
-                )
+            batch_xs, batch_fvals, updated = _local_search_discrete_batched(
+                acqf, best_xs[current_indices], best_fvals[current_indices], i, choices, xtol
             )
-            last_changed_dims = np.where(updated, i, last_changed_dims)
-
-        # Parameters not changed from the beginning or last changed dimension is continuous.
-        remaining_inds = remaining_inds[~(is_converged := last_changed_dims == CONTINUOUS)]
-        last_changed_dims = last_changed_dims[~is_converged]
-        if remaining_inds.size == 0:
+            best_xs[current_indices] = batch_xs
+            best_fvals[current_indices] = batch_fvals
+            last_changed_dims[current_indices] = np.where(updated, i, last_changed_dims[current_indices])
+        # Check for convergence (continuous)
+        is_converged = last_changed_dims == CONTINUOUS
+        unconverged_mask = ~is_converged
+        current_indices = current_indices[unconverged_mask]
+        last_changed_dims = last_changed_dims[unconverged_mask]
+        if current_indices.size == 0:
             return best_xs, best_fvals
     else:
         _logger.warning("local_search_mixed: Local search did not converge.")
