@@ -171,6 +171,13 @@ def _is_pareto_front(loss_values: np.ndarray, assume_unique_lexsorted: bool) -> 
     if assume_unique_lexsorted:
         return _is_pareto_front_for_unique_sorted(loss_values)
 
+    # Fast path for 1D arrays (one-objective) since np.unique can be expensive for large arrays
+    if loss_values.ndim == 2 and loss_values.shape[1] == 1:
+        unique_vals, order_inv = np.unique(loss_values[:, 0], return_inverse=True)
+        on_front = np.zeros(unique_vals.shape[0], dtype=bool)
+        on_front[0] = True  # Only the smallest value is Pareto optimal for minimization
+        return on_front[order_inv.reshape(-1)]
+
     unique_lexsorted_loss_values, order_inv = np.unique(loss_values, axis=0, return_inverse=True)
     on_front = _is_pareto_front_for_unique_sorted(unique_lexsorted_loss_values)
     # NOTE(nabenabe): We can remove `.reshape(-1)` if ``numpy==2.0.0`` is not used.
@@ -195,16 +202,18 @@ def _calculate_nondomination_rank(
     unique_lexsorted_loss_values, order_inv = np.unique(loss_values, return_inverse=True, axis=0)
     n_unique = unique_lexsorted_loss_values.shape[0]
     # Clip n_below.
-    n_below = min(n_below or len(unique_lexsorted_loss_values), len(unique_lexsorted_loss_values))
+    n_below = min(n_below or n_unique, n_unique)
     ranks = np.zeros(n_unique, dtype=int)
     rank = 0
     indices = np.arange(n_unique)
     while n_unique - indices.size < n_below:
-        on_front = _is_pareto_front(unique_lexsorted_loss_values, assume_unique_lexsorted=True)
+        # Instead of re-indexing and copying arrays multiple times, keep a mask for valid indices
+        # Next two lines: reduces memory reallocations by not creating subarrays of the candidates
+        sub_values = unique_lexsorted_loss_values[indices]
+        on_front = _is_pareto_front(sub_values, assume_unique_lexsorted=True)
         ranks[indices[on_front]] = rank
         # Remove the recent Pareto solutions.
         indices = indices[~on_front]
-        unique_lexsorted_loss_values = unique_lexsorted_loss_values[~on_front]
         rank += 1
 
     ranks[indices] = rank  # Rank worse than the top n_below is defined as the worst rank.
