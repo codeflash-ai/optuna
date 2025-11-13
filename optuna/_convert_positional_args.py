@@ -42,8 +42,7 @@ def _get_positional_arg_names(func: "Callable[_P, _T]") -> list[str]:
 
 
 def _infer_kwargs(previous_positional_arg_names: Sequence[str], *args: Any) -> dict[str, Any]:
-    inferred_kwargs = {arg_name: val for val, arg_name in zip(args, previous_positional_arg_names)}
-    return inferred_kwargs
+    return dict(zip(previous_positional_arg_names, args))
 
 
 def convert_positional_args(
