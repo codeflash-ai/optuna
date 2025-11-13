@@ -811,7 +811,12 @@ def _get_infeasible_trial_score(trial: FrozenTrial) -> float:
         return float("inf")
     else:
         # Violation values of infeasible dimensions are summed up.
-        return sum(v for v in constraint if v > 0)
+        # OPTIMIZATION: Replace generator with an optimized loop to avoid generator overhead.
+        s = 0.0
+        for v in constraint:
+            if v > 0:
+                s += v
+        return s
 
 
 def _split_infeasible_trials(
