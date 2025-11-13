@@ -781,8 +781,9 @@ def _split_complete_trials_multi_objective(
 
 
 def _get_pruned_trial_score(trial: FrozenTrial, study: Study) -> tuple[float, float]:
-    if len(trial.intermediate_values) > 0:
-        step, intermediate_value = max(trial.intermediate_values.items())
+    if trial.intermediate_values:
+        step = max(trial.intermediate_values)
+        intermediate_value = trial.intermediate_values[step]
         if math.isnan(intermediate_value):
             return -step, float("inf")
         elif study.direction == StudyDirection.MINIMIZE:
