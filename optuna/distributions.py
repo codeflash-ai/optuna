@@ -462,9 +462,16 @@ def _categorical_choice_equal(
     This function can handle NaNs like np.float32("nan") other than float.
     """
 
-    value1_is_nan = isinstance(value1, Real) and math.isnan(float(value1))
-    value2_is_nan = isinstance(value2, Real) and math.isnan(float(value2))
-    return (value1 == value2) or (value1_is_nan and value2_is_nan)
+    # Fast equality check first (covers all types except NaN edge case)
+    if value1 == value2:
+        return True
+
+    # Optimize isinstance checks by combining them, avoids repeated calls
+    if not (isinstance(value1, Real) and isinstance(value2, Real)):
+        return False
+
+    # Directly check if both are NaN
+    return math.isnan(value1) and math.isnan(value2)
 
 
 class CategoricalDistribution(BaseDistribution):
@@ -492,16 +499,22 @@ class CategoricalDistribution(BaseDistribution):
     def __init__(self, choices: Sequence[CategoricalChoiceType]) -> None:
         if len(choices) == 0:
             raise ValueError("The `choices` must contain one or more elements.")
-        for choice in choices:
-            if choice is not None and not isinstance(choice, (bool, int, float, str)):
-                message = (
-                    "Choices for a categorical distribution should be a tuple of None, bool, int, "
-                    "float and str for persistent storage but contains "
-                    f"{choice} which is of type {type(choice).__name__}."
-                )
-                warnings.warn(message)
+        # Convert choices to tuple once for both validation and assignment to avoid redundant work
+        choices_tuple = tuple(choices)
+        # Use generator expression with any() for faster detection of incompatible types in the sequence
+        invalid_choice = next(
+            (choice for choice in choices_tuple if choice is not None and not isinstance(choice, (bool, int, float, str))),
+            None
+        )
+        if invalid_choice is not None:
+            message = (
+                "Choices for a categorical distribution should be a tuple of None, bool, int, "
+                "float and str for persistent storage but contains "
+                f"{invalid_choice} which is of type {type(invalid_choice).__name__}."
+            )
+            warnings.warn(message)
 
-        self.choices = tuple(choices)
+        self.choices = choices_tuple
 
     def to_external_repr(self, param_value_in_internal_repr: float) -> CategoricalChoiceType:
         return self.choices[int(param_value_in_internal_repr)]
