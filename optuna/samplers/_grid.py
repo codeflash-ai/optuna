@@ -3,13 +3,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from collections.abc import Sequence
 import itertools
-from numbers import Real
 from typing import Any
 from typing import TYPE_CHECKING
 from typing import Union
 import warnings
-
-import numpy as np
 
 from optuna.distributions import BaseDistribution
 from optuna.logging import get_logger
@@ -107,7 +104,7 @@ class GridSampler(BaseSampler):
     """
 
     def __init__(
-        self, search_space: Mapping[str, Sequence[GridValueType]], seed: int | None = None
+        self, search_space: Mapping[str, Sequence["GridValueType"]], seed: int | None = None
     ) -> None:
         for param_name, param_values in search_space.items():
             for value in param_values:
@@ -261,9 +258,27 @@ class GridSampler(BaseSampler):
 
     @staticmethod
     def _grid_value_equal(value1: GridValueType, value2: GridValueType) -> bool:
-        value1_is_nan = isinstance(value1, Real) and np.isnan(float(value1))
-        value2_is_nan = isinstance(value2, Real) and np.isnan(float(value2))
-        return (value1 == value2) or (value1_is_nan and value2_is_nan)
+        # Opt: avoid np.isnan(float(x)) for known non-float types, check float-ness once
+        # This addresses profiling showing isinstance(..., Real)+np.isnan dominating cost
+        if value1 == value2:
+            return True
+
+        # Only check for NaN if both are float-y types
+        # Avoid float conversion and np.isnan for obviously non-float types
+        v1_isfloat = isinstance(value1, float)
+        v2_isfloat = isinstance(value2, float)
+
+        if v1_isfloat and v2_isfloat:
+            # Use math.isnan (faster than numpy and does not import extra dependencies)
+            # If both are NaN, treat as equal
+            # math.isnan will only accept float
+            import math
+
+            return math.isnan(value1) and math.isnan(value2)
+
+        # If one or both are not float, do not check for NaN per original grid semantics
+        # If both were int, None, bool, etc, they must be equal to return True above
+        return False
 
     def _same_search_space(self, search_space: Mapping[str, Sequence[GridValueType]]) -> bool:
         if set(search_space.keys()) != set(self._search_space.keys()):
