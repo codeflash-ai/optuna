@@ -244,17 +244,21 @@ class HyperbandPruner(BasePruner):
         `Hyperband paper <http://www.jmlr.org/papers/volume18/16-558/16-558.pdf>`__.
         """
 
-        if len(self._pruners) == 0:
+        if not self._pruners:
             return 0
 
         assert self._n_brackets is not None
         n = (
-            binascii.crc32("{}_{}".format(study.study_name, trial.number).encode())
+            binascii.crc32(f"{study.study_name}_{trial.number}".encode())
             % self._total_trial_allocation_budget
         )
+
+        budgets = self._trial_allocation_budgets
+        total = 0
+        # Use tight loop and pre-cached variables for performance.
         for bracket_id in range(self._n_brackets):
-            n -= self._trial_allocation_budgets[bracket_id]
-            if n < 0:
+            total += budgets[bracket_id]
+            if n < total:
                 return bracket_id
 
         assert False, "This line should be unreachable."
