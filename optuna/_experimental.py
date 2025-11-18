@@ -46,7 +46,7 @@ def _validate_version(version: str) -> None:
 
 
 def _get_docstring_indent(docstring: str) -> str:
-    return docstring.split("\n")[-1] if "\n" in docstring else ""
+    return docstring.rsplit("\n", 1)[-1] if "\n" in docstring else ""
 
 
 def experimental_func(
