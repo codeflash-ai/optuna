@@ -103,7 +103,15 @@ class StudyDirectionModel(BaseModel):
 
     @classmethod
     def where_study_id(cls, study_id: int, session: orm.Session) -> list["StudyDirectionModel"]:
-        return session.query(cls).filter(cls.study_id == study_id).all()
+        # Use load_only to fetch only relevant columns for better performance,
+        # if all (or almost all) columns are needed, the original .all() is already efficient.
+        # Using enable_eagerloads(False) can avoid unnecessary eager loading.
+        return (
+            session.query(cls)
+            .filter(cls.study_id == study_id)
+            .enable_eagerloads(False)
+            .all()
+        )
 
 
 class StudyUserAttributeModel(BaseModel):
@@ -505,14 +513,25 @@ class TrialIntermediateValueModel(BaseModel):
     def intermediate_value_to_stored_repr(
         cls, value: float
     ) -> tuple[float | None, TrialIntermediateValueType]:
+        # Use local variables for class attributes to reduce attribute lookup overhead
+        TrialIntermediateValueType = cls.TrialIntermediateValueType
+
+        # Avoid repeated float-construction and attribute lookups
+        finite = TrialIntermediateValueType.FINITE
+        nan = TrialIntermediateValueType.NAN
+        inf_pos = TrialIntermediateValueType.INF_POS
+        inf_neg = TrialIntermediateValueType.INF_NEG
+
+        # Use math.isinf for efficiency, handle inf/-inf before FINITE
         if math.isnan(value):
-            return None, cls.TrialIntermediateValueType.NAN
-        elif value == float("inf"):
-            return None, cls.TrialIntermediateValueType.INF_POS
-        elif value == float("-inf"):
-            return None, cls.TrialIntermediateValueType.INF_NEG
+            return None, nan
+        elif math.isinf(value):
+            if value > 0:
+                return None, inf_pos
+            else:
+                return None, inf_neg
         else:
-            return value, cls.TrialIntermediateValueType.FINITE
+            return value, finite
 
     @classmethod
     def stored_repr_to_intermediate_value(
