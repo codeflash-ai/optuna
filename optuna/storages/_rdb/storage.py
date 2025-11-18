@@ -952,7 +952,21 @@ class RDBStorage(BaseStorage, BaseHeartbeat):
 
     @staticmethod
     def _fill_storage_url_template(template: str) -> str:
-        return template.format(SCHEMA_VERSION=models.SCHEMA_VERSION)
+        # Optimization: Cache the formatted result for previously seen templates and schema versions.
+        # This reduces repeated costly format string operations.
+        # The cache size is unbounded but usage pattern for templates is usually sparse and small.
+        cache: dict[tuple[str, str], str] = getattr(RDBStorage._fill_storage_url_template, "_cache", None)
+        schema_version = models.SCHEMA_VERSION
+        if cache is None:
+            cache = {}
+            setattr(RDBStorage._fill_storage_url_template, "_cache", cache)
+        key = (template, schema_version)
+        result = cache.get(key)
+        if result is not None:
+            return result
+        result = template.format(SCHEMA_VERSION=schema_version)
+        cache[key] = result
+        return result
 
     def remove_session(self) -> None:
         """Removes the current session.
