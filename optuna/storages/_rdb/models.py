@@ -63,15 +63,15 @@ class StudyModel(BaseModel):
     def find_or_raise_by_id(
         cls, study_id: int, session: orm.Session, for_update: bool = False
     ) -> "StudyModel":
-        query = session.query(cls).filter(cls.study_id == study_id)
-
-        if for_update:
+        # Use session.get for primary key lookup (faster and more idiomatic for SQLAlchemy >=1.4)
+        if not for_update:
+            study = session.get(cls, study_id)
+        else:
+            query = session.query(cls).filter(cls.study_id == study_id)
             query = query.with_for_update()
-
-        study = query.one_or_none()
+            study = query.one_or_none()
         if study is None:
             raise KeyError(NOT_FOUND_MSG)
-
         return study
 
     @classmethod
@@ -505,14 +505,25 @@ class TrialIntermediateValueModel(BaseModel):
     def intermediate_value_to_stored_repr(
         cls, value: float
     ) -> tuple[float | None, TrialIntermediateValueType]:
+        # Use local variables for class attributes to reduce attribute lookup overhead
+        TrialIntermediateValueType = cls.TrialIntermediateValueType
+
+        # Avoid repeated float-construction and attribute lookups
+        finite = TrialIntermediateValueType.FINITE
+        nan = TrialIntermediateValueType.NAN
+        inf_pos = TrialIntermediateValueType.INF_POS
+        inf_neg = TrialIntermediateValueType.INF_NEG
+
+        # Use math.isinf for efficiency, handle inf/-inf before FINITE
         if math.isnan(value):
-            return None, cls.TrialIntermediateValueType.NAN
-        elif value == float("inf"):
-            return None, cls.TrialIntermediateValueType.INF_POS
-        elif value == float("-inf"):
-            return None, cls.TrialIntermediateValueType.INF_NEG
+            return None, nan
+        elif math.isinf(value):
+            if value > 0:
+                return None, inf_pos
+            else:
+                return None, inf_neg
         else:
-            return value, cls.TrialIntermediateValueType.FINITE
+            return value, finite
 
     @classmethod
     def stored_repr_to_intermediate_value(
