@@ -12,6 +12,7 @@ from optuna.search_space import intersection_search_space
 from optuna.study import StudyDirection
 from optuna.trial import FrozenTrial
 from optuna.trial import TrialState
+from optuna._imports import _LazyImport
 
 
 if TYPE_CHECKING:
@@ -212,21 +213,34 @@ class BestValueStagnationEvaluator(BaseImprovementEvaluator):
         self._max_stagnation_trials = max_stagnation_trials
 
     def evaluate(self, trials: list[FrozenTrial], study_direction: StudyDirection) -> float:
-        self._validate_input(trials)
+        # Optimize input validation and completed trial filtering for single pass
+        completed_trials = []
+        for t in trials:
+            if t.state == TrialState.COMPLETE:
+                completed_trials.append(t)
+        if not completed_trials:
+            raise ValueError(
+                "Because no trial has been completed yet, the improvement cannot be evaluated."
+            )
         is_maximize_direction = True if (study_direction == StudyDirection.MAXIMIZE) else False
-        trials = [t for t in trials if t.state == TrialState.COMPLETE]
-        current_step = len(trials) - 1
+        current_step = len(completed_trials) - 1
+
+        # Find latest best trial step by single forward scan using comparison
 
         best_step = 0
-        for i, trial in enumerate(trials):
-            best_value = trials[best_step].value
-            current_value = trial.value
-            assert best_value is not None
+        best_value = completed_trials[0].value
+        assert best_value is not None
+        for i in range(1, len(completed_trials)):
+            current_value = completed_trials[i].value
             assert current_value is not None
-            if is_maximize_direction and (best_value < current_value):
-                best_step = i
-            elif (not is_maximize_direction) and (best_value > current_value):
-                best_step = i
+            if is_maximize_direction:
+                if best_value < current_value:
+                    best_step = i
+                    best_value = current_value
+            else:
+                if best_value > current_value:
+                    best_step = i
+                    best_value = current_value
 
         return self._max_stagnation_trials - (current_step - best_step)
 
