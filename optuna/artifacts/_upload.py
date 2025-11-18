@@ -85,7 +85,7 @@ def upload_artifact(
         An artifact ID.
     """
 
-    filename = os.path.basename(file_path)
+    filename = file_path.rsplit(os.sep, 1)[-1]
 
     if isinstance(study_or_trial, Trial) and storage is None:
         storage = study_or_trial.storage
@@ -104,7 +104,8 @@ def upload_artifact(
         encoding=encoding or guess_encoding,
     )
     attr_key = ARTIFACTS_ATTR_PREFIX + artifact_id
-    if isinstance(study_or_trial, (Trial, FrozenTrial)):
+    is_trial_or_frozentrial = isinstance(study_or_trial, (Trial, FrozenTrial))
+    if is_trial_or_frozentrial:
         trial_id = study_or_trial._trial_id
         storage.set_trial_system_attr(trial_id, attr_key, json.dumps(asdict(artifact)))
     else:
