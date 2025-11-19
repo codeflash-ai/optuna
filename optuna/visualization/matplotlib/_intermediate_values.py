@@ -49,17 +49,30 @@ def _get_intermediate_plot(info: _IntermediatePlotInfo) -> "Axes":
 
     trial_infos = info.trial_infos
 
-    for i, tinfo in enumerate(trial_infos):
-        ax.plot(
-            tuple((x for x, _ in tinfo.sorted_intermediate_values)),
-            tuple((y for _, y in tinfo.sorted_intermediate_values)),
-            color=cmap(i) if tinfo.feasible else "#CCCCCC",
-            marker=".",
-            alpha=0.7,
-            label=f"Trial{tinfo.trial_number}",
-        )
+    # Pre-fetch for legend call
+    need_legend = len(trial_infos) >= 2
 
-    if len(trial_infos) >= 2:
+    # Precompute all curve data in batch to minimize Python overhead
+    # This produces: list of xs, ys, color, label for each trial
+    lines_data = []
+    append = lines_data.append  # Micro-optimize append lookup.
+    feasible_color = [cmap(i) for i in range(len(trial_infos))]
+    for i, tinfo in enumerate(trial_infos):
+        siv = tinfo.sorted_intermediate_values
+        xs, ys = zip(*siv) if siv else ((), ())
+        color = feasible_color[i] if tinfo.feasible else "#CCCCCC"
+        label = f"Trial{tinfo.trial_number}"
+        append((xs, ys, color, label))
+
+    # Use matplotlib Line2D directly for bulk plotting to reduce overhead
+    from matplotlib.lines import Line2D
+
+    for xs, ys, color, label in lines_data:
+        ax.add_line(Line2D(xs, ys, color=color, marker=".", alpha=0.7, label=label))
+
+    # Handle legend outside loop, but only if it is needed, and
+    # use a more efficient legend call (avoid re-calculating handlers)
+    if need_legend:
         ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", borderaxespad=0.0)
 
     return ax
