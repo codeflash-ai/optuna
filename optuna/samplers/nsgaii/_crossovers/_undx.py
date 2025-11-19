@@ -109,7 +109,7 @@ class UNDXCrossover(BaseCrossover):
     def _normalized_x1_to_x2(parents_params: np.ndarray) -> np.ndarray:
         # Compute the normalized vector from x1 to x2.
         v_12 = parents_params[1] - parents_params[0]
-        m_12 = np.linalg.norm(v_12, ord=2)
-        e_12 = v_12 / np.clip(m_12, 1e-10, None)
+        m_12 = np.sqrt(np.dot(v_12, v_12))
+        e_12 = v_12 / (m_12 if m_12 > 1e-10 else 1e-10)
 
         return e_12
