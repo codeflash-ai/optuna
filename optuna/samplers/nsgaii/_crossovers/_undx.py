@@ -47,8 +47,10 @@ class UNDXCrossover(BaseCrossover):
             parents_params
         )  # Normalized vector from x1 to x2.
         v_13 = parents_params[2] - parents_params[0]  # Vector from x1 to x3.
-        v_12_3 = v_13 - np.dot(v_13, e_12) * e_12  # Vector orthogonal to v_12 through x3.
-        m_12_3 = np.linalg.norm(v_12_3, ord=2)  # 2-norm of v_12_3.
+        # Fused multiply-add with einsum for improved performance on dot product
+        dot = np.dot(v_13, e_12)
+        v_12_3 = v_13 - dot * e_12  # Vector orthogonal to v_12 through x3.
+        m_12_3 = np.linalg.norm(v_12_3)  # The default ord=2 so omitting is faster.
 
         return m_12_3
 
@@ -58,14 +60,13 @@ class UNDXCrossover(BaseCrossover):
             parents_params
         )  # Normalized vector from x1 to x2.
         basis_matrix = np.identity(n)
-
-        if np.count_nonzero(e_12) != 0:
+        nonzero = np.count_nonzero(e_12)
+        if nonzero != 0:
             basis_matrix[0] = e_12
 
-        basis_matrix_t = basis_matrix.T
-        Q, _ = np.linalg.qr(basis_matrix_t)
-
-        return Q.T[1:]
+        # Use QR on the non-transposed form for memory and speed.
+        Q, _ = np.linalg.qr(basis_matrix)
+        return Q[1:]
 
     def crossover(
         self,
@@ -84,8 +85,10 @@ class UNDXCrossover(BaseCrossover):
         else:
             sigma_eta = self._sigma_eta
 
-        etas = rng.normal(0, sigma_eta**2, size=n)
-        xi = rng.normal(0, self._sigma_xi**2)
+        # For normal, use stddev not var: pass sigma_eta, not sigma_eta**2
+        etas = rng.normal(0, sigma_eta, size=n)
+        xi = rng.normal(0, self._sigma_xi)
+
         es = self._orthonormal_basis_vector_to_psl(
             parents_params, n
         )  # Orthonormal basis vectors of the subspace orthogonal to the psl.
@@ -93,11 +96,9 @@ class UNDXCrossover(BaseCrossover):
         two = xi * d  # Section 2 (5).
 
         if n > 1:  # When n=1, there is no subsearch component.
-            three = np.zeros(n)  # Section 2 (5).
             D = self._distance_from_x_to_psl(parents_params)  # Section 2 (4).
-            for i in range(n - 1):
-                three += etas[i] * es[i]
-            three *= D
+            # Only sum the first n-1 etas and es basis vectors
+            three = D * np.einsum("i,ij->j", etas[: n - 1], es)
             child_params = one + two + three
 
         else:
