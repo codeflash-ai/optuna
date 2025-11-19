@@ -47,15 +47,43 @@ class SPXCrossover(BaseCrossover):
         # Section 2 A Brief Review of SPX
 
         n = self.n_parents - 1
-        G = np.mean(parents_params, axis=0)  # Equation (1).
+        G = np.mean(parents_params, axis=0, dtype=parents_params.dtype)  # Equation (1).
         rs = np.power(rng.rand(n), 1 / (np.arange(n) + 1))  # Equation (2).
 
         epsilon = np.sqrt(len(search_space_bounds) + 2) if self._epsilon is None else self._epsilon
-        xks = [G + epsilon * (pk - G) for pk in parents_params]  # Equation (3).
 
-        ck = 0  # Equation (4).
-        for k in range(1, self.n_parents):
-            ck = rs[k - 1] * (xks[k - 1] - xks[k] + ck)
+        # Use numpy vectorization to compute all xks at once for better performance.
+        # parents_params.shape = (n_parents, param_dim)
+        # G.shape = (param_dim,)
+        xks = G + epsilon * (parents_params - G)  # Shape: (n_parents, param_dim)
+
+        # Vectorize calculation of ck to avoid Python loop
+        # We're computing: ck = rs[0]*(xks[0]-xks[1]) + rs[1]*(xks[1]-xks[2] + ...) for three parents (n_parents=3)
+        # Generalizing for any n_parents
+
+        # xks shape: (n_parents, param_dim)
+        # For k in 1..n_parents-1 (i.e. 1..n)
+        # Precompute the deltas (xks[0]-xks[1], xks[1]-xks[2], ...)
+        if self.n_parents == 3:
+            # Common case: hardcoded for n_parents == 3 for best possible performance
+            # Unroll the loop for n=2 (so k=1,2):
+            # ck = rs[0] * (xks[0] - xks[1])
+            # ck = rs[1] * (xks[1] - xks[2] + ck)
+            # ==> ck = rs[1] * (xks[1] - xks[2] + rs[0] * (xks[0] - xks[1]))
+            # Simplifies to:
+            ck = rs[1] * (xks[1] - xks[2] + rs[0] * (xks[0] - xks[1]))
+        else:
+            # General case: use for-loop, but use in-place addition and limit temporary allocations
+            ck = np.zeros_like(G)
+            for k in range(1, self.n_parents):
+                # Compute delta = xks[k-1] - xks[k]
+                np.subtract(xks[k - 1], xks[k], out=ck)
+                # Add previous ck
+                if k > 1:
+                    ck += prev_ck
+                # Scale with rs[k-1]
+                prev_ck = rs[k - 1] * ck
+            ck = prev_ck  # type: ignore
 
         child_params = xks[-1] + ck  # Equation (5).
 
