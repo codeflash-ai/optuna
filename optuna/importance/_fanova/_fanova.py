@@ -22,6 +22,7 @@ import numpy as np
 
 from optuna._imports import try_import
 from optuna.importance._fanova._tree import _FanovaTree
+from sklearn.ensemble import RandomForestRegressor
 
 
 with try_import() as _imports:
@@ -79,17 +80,22 @@ class _Fanova:
 
         self._compute_variances(feature)
 
-        fractions: list[float] | np.ndarray = []
+        # Preallocate fractions for performance
+        n_trees = len(self._trees)
+        # We cannot know upfront how many valid trees will have tree.variance > 0.0
+        # Therefore, collect valid fractions in a Python list first
+        fractions_list = []
 
-        for tree_index, tree in enumerate(self._trees):
-            tree_variance = tree.variance
-            if tree_variance > 0.0:
-                fraction = self._variances[feature][tree_index] / tree_variance
-                fractions = np.append(fractions, fraction)
+        tree_variances = np.array([tree.variance for tree in self._trees], dtype=np.float64)
+        feature_variances = self._variances[feature]
+        # Use numpy boolean indexing for fast masking
+        mask = tree_variances > 0.0
+        # Only divide feature_variances by tree_variances where tree_variances > 0.0
+        valid_fractions = feature_variances[mask] / tree_variances[mask]
+        # Compute mean and std directly
+        mean, std = valid_fractions.mean(), valid_fractions.std()
 
-        fractions = np.asarray(fractions)
-
-        return float(fractions.mean()), float(fractions.std())
+        return float(mean), float(std)
 
     def _compute_variances(self, feature: int) -> None:
         assert self._trees is not None
@@ -100,9 +106,12 @@ class _Fanova:
             return
 
         raw_features = self._column_to_encoded_columns[feature]
-        variances = np.empty(len(self._trees), dtype=np.float64)
+        n_trees = len(self._trees)
+        variances = np.empty(n_trees, dtype=np.float64)
+        # Vectorize marginal variance collection if possible, else loop as before
 
         for tree_index, tree in enumerate(self._trees):
             marginal_variance = tree.get_marginal_variance(raw_features)
-            variances[tree_index] = np.clip(marginal_variance, 0.0, None)
+            # Clip negative values to 0.0
+            variances[tree_index] = marginal_variance if marginal_variance > 0.0 else 0.0
         self._variances[feature] = variances
