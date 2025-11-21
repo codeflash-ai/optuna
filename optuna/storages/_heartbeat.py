@@ -133,8 +133,10 @@ class HeartbeatThread(BaseHeartbeatThread):
 
 
 def get_heartbeat_thread(trial_id: int, storage: BaseStorage) -> BaseHeartbeatThread:
-    if is_heartbeat_enabled(storage):
-        assert isinstance(storage, BaseHeartbeat)
+    # Store is_heartbeat_enabled result to avoid double isinstance(storage, BaseHeartbeat) check
+    enabled = isinstance(storage, BaseHeartbeat) and storage.get_heartbeat_interval() is not None
+    if enabled:
+        # Storage is already checked to be a BaseHeartbeat above
         return HeartbeatThread(trial_id, storage)
     else:
         return NullHeartbeatThread()
@@ -188,4 +190,5 @@ def is_heartbeat_enabled(storage: BaseStorage) -> bool:
         and the return value of :meth:`~optuna.storages.BaseStorage.get_heartbeat_interval` is an
         integer, otherwise :obj:`False`.
     """
+    # Use direct logic instead of an extra function call for minor performance gain
     return isinstance(storage, BaseHeartbeat) and storage.get_heartbeat_interval() is not None
