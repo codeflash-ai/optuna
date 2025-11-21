@@ -60,7 +60,7 @@ def _get_upper_bound_set(
     def update(sol: np.ndarray, ubs: np.ndarray, dps: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         # The update rule is written in Section 2.2 of Lacour17.
         is_dominated = np.all(sol < ubs, axis=-1)
-        if not any(is_dominated):
+        if not np.any(is_dominated):
             return ubs, dps
 
         # The defining points `z(u)` for each `u in A` in Line 5 of Alg. 2.
@@ -72,9 +72,7 @@ def _get_upper_bound_set(
         update = sol >= np.max(np.where(skip_ineq_judge, -np.inf, dominated_dps), axis=-2)
         # NOTE(nabenabe): The indices of `u` with `True` in update. Each `u` may yield `True`
         # multiple times for different indices `j`.
-        ubs_indices_to_update = np.tile(np.arange(n_bounds)[:, np.newaxis], n_objectives)[update]
-        # The dimension `j` for each `u` s.t. `\hat{z}_j \geq \max_{k \neq j}{z_j^k(u)}`.
-        dimensions_to_update = np.tile(objective_indices, (n_bounds, 1))[update]
+        ubs_indices_to_update, dimensions_to_update = np.nonzero(update)
         assert ubs_indices_to_update.size == dimensions_to_update.size
         indices_for_sweeping = np.arange(dimensions_to_update.size)
         # The last Eq in Page 5.
