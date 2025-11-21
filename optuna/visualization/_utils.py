@@ -87,9 +87,10 @@ def _is_numerical(trials: list[FrozenTrial], param: str) -> bool:
             return True
         elif isinstance(dist, CategoricalDistribution):
             # NOTE: Although it is a bit odd to do so, we keep it as is only for visualization.
-            return all(
-                isinstance(v, (int, float)) and not isinstance(v, bool) for v in dist.choices
-            )
+            # NOTE: Although it is a bit odd to do so, we keep it as is only for visualization.
+            choices = dist.choices
+            # Use generator expression for memory efficiency (all() short-circuits)
+            return all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in choices)
         else:
             assert False, "Should not reach."
     return True
