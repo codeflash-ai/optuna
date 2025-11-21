@@ -27,6 +27,8 @@ else:
     api_pb2_grpc = _LazyImport("optuna.storages._grpc.auto_generated.api_pb2_grpc")
     grpc = _LazyImport("grpc")
 
+_SET_STUDY_SYSTEM_ATTR_REPLY = api_pb2.SetStudySystemAttributeReply()
+
 
 _logger = logging.get_logger(__name__)
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
@@ -90,7 +92,7 @@ class OptunaStorageProxyService(api_pb2_grpc.StorageServiceServicer):
             )
         except KeyError as e:
             context.abort(code=grpc.StatusCode.NOT_FOUND, details=str(e))
-        return api_pb2.SetStudySystemAttributeReply()
+        return _SET_STUDY_SYSTEM_ATTR_REPLY
 
     def GetStudyIdFromName(
         self,
