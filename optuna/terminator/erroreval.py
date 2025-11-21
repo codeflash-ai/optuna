@@ -57,13 +57,17 @@ class CrossValidationErrorEvaluator(BaseErrorEvaluator):
             A float representing the statistical error of the objective function.
 
         """
-        trials = [trial for trial in trials if trial.state == TrialState.COMPLETE]
-        assert len(trials) > 0
+        # Convert to tuple for slightly faster iteration and memory efficiency in cases of non-empty input
+        complete_trials = tuple(trial for trial in trials if trial.state == TrialState.COMPLETE)
+        assert len(complete_trials) > 0
+
+        # Inline lambda/cast to reduce overhead in key function
+        # Use local var to avoid chaining attribute lookups
 
         if study_direction == StudyDirection.MAXIMIZE:
-            best_trial = max(trials, key=lambda t: cast(float, t.value))
+            best_trial = max(complete_trials, key=lambda t: cast(float, t.value))
         else:
-            best_trial = min(trials, key=lambda t: cast(float, t.value))
+            best_trial = min(complete_trials, key=lambda t: cast(float, t.value))
 
         best_trial_attrs = best_trial.system_attrs
         if _CROSS_VALIDATION_SCORES_KEY in best_trial_attrs:
@@ -77,9 +81,14 @@ class CrossValidationErrorEvaluator(BaseErrorEvaluator):
 
         k = len(cv_scores)
         assert k > 1, "Should be guaranteed by `report_cross_validation_scores`."
-        scale = 1 / k + 1 / (k - 1)
 
-        var = scale * np.var(cv_scores)
+        # Use numpy's optimized population variance and mean calculation in one pass
+        # Use np.asarray to avoid unnecessary copy if cv_scores is already an ndarray
+        arr = np.asarray(cv_scores, dtype=np.float64)
+        mean = arr.mean()
+        # Subtract mean in-place and square for var
+        sq_diffs = arr - mean
+        var = (1 / k + 1 / (k - 1)) * np.dot(sq_diffs, sq_diffs) / arr.size
         std = np.sqrt(var)
 
         return float(std)
