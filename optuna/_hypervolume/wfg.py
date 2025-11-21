@@ -151,15 +151,31 @@ def compute_hypervolume(
         return 0.0
 
     if not assume_pareto:
-        unique_lexsorted_loss_vals = np.unique(loss_vals, axis=0)
+        # Combine unique and lexsort for optimal performance and to avoid multiple np.unique calls
+        def _unique_lexsort(arr: np.ndarray):
+            order = np.lexsort(arr.T[::-1])
+            lexsorted = arr[order]
+            diff = np.any(np.diff(lexsorted, axis=0), axis=1)
+            unique_idx = np.concatenate(([True], diff))
+            unique_lexsorted = lexsorted[unique_idx]
+            return unique_lexsorted
+
+        unique_lexsorted_loss_vals = _unique_lexsort(loss_vals)
         on_front = _is_pareto_front(unique_lexsorted_loss_vals, assume_unique_lexsorted=True)
         sorted_pareto_sols = unique_lexsorted_loss_vals[on_front]
+        if sorted_pareto_sols.shape[0] == 1:
+            # Direct shortcut for one Pareto point (avoids sort in next step)
+            single_point = sorted_pareto_sols[0][None, :]
+            if reference_point.shape[0] == 2:
+                return _compute_2d(single_point, reference_point)
+            elif reference_point.shape[0] == 3:
+                return _compute_3d(single_point, reference_point)
+            else:
+                return _compute_hv(single_point, reference_point)
     else:
-        # NOTE(nabenabe): The result of this function does not change both by
-        # np.argsort(loss_vals[:, 0]) and np.unique(loss_vals, axis=0).
-        # But many duplications in loss_vals significantly slows down the function.
-        # TODO(nabenabe): Make an option to use np.unique.
-        sorted_pareto_sols = loss_vals[loss_vals[:, 0].argsort()]
+        # Use lexsort for a full lexicographical stable order (more robust for ties)
+        order = np.lexsort(loss_vals.T[::-1])
+        sorted_pareto_sols = loss_vals[order]
 
     if reference_point.shape[0] == 2:
         hv = _compute_2d(sorted_pareto_sols, reference_point)
