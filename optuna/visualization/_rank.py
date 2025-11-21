@@ -217,8 +217,9 @@ def _get_axis_info(trials: list[FrozenTrial], param_name: str) -> _AxisInfo:
             str(t.params.get(param_name)) if param_name in t.params else None for t in trials
         ]
 
-    min_value = min([v for v in values if v is not None])
-    max_value = max([v for v in values if v is not None])
+    filtered_values = [v for v in values if v is not None]
+    min_value = min(filtered_values)
+    max_value = max(filtered_values)
 
     if _is_log_scale(trials, param_name):
         min_value = float(min_value)
