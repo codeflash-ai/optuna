@@ -27,6 +27,8 @@ else:
     api_pb2_grpc = _LazyImport("optuna.storages._grpc.auto_generated.api_pb2_grpc")
     grpc = _LazyImport("grpc")
 
+_json_decoder = json.JSONDecoder()
+
 
 _logger = logging.get_logger(__name__)
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
@@ -299,7 +301,7 @@ class OptunaStorageProxyService(api_pb2_grpc.StorageServiceServicer):
     ) -> api_pb2.SetTrialSystemAttributeReply:
         trial_id = request.trial_id
         key = request.key
-        value = json.loads(request.value)
+        value = _json_decoder.decode(request.value)
         try:
             self._backend.set_trial_system_attr(trial_id, key, value)
         except KeyError as e:
