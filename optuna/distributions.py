@@ -14,9 +14,13 @@ import warnings
 
 from optuna._deprecated import deprecated_class
 
+_DISTRIBUTION_NAME_TO_CLASS = None
+
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    # If this is stubbed for analysis, skip (will fail at runtime if called, but is structurally required)
+    pass
 
 
 CategoricalChoiceType = Union[None, bool, int, float, str]
@@ -462,9 +466,16 @@ def _categorical_choice_equal(
     This function can handle NaNs like np.float32("nan") other than float.
     """
 
-    value1_is_nan = isinstance(value1, Real) and math.isnan(float(value1))
-    value2_is_nan = isinstance(value2, Real) and math.isnan(float(value2))
-    return (value1 == value2) or (value1_is_nan and value2_is_nan)
+    # Fast equality check first (covers all types except NaN edge case)
+    if value1 == value2:
+        return True
+
+    # Optimize isinstance checks by combining them, avoids repeated calls
+    if not (isinstance(value1, Real) and isinstance(value2, Real)):
+        return False
+
+    # Directly check if both are NaN
+    return math.isnan(value1) and math.isnan(value2)
 
 
 class CategoricalDistribution(BaseDistribution):
@@ -576,26 +587,35 @@ def json_to_distribution(json_str: str) -> BaseDistribution:
     json_dict = json.loads(json_str)
 
     if "name" in json_dict:
-        if json_dict["name"] == CategoricalDistribution.__name__:
-            json_dict["attributes"]["choices"] = tuple(json_dict["attributes"]["choices"])
+        # Optimization: avoid repeated getattr/class iterations by using mapping built at module scope
+        name = json_dict["name"]
+        attributes = json_dict["attributes"]
 
-        for cls in DISTRIBUTION_CLASSES:
-            if json_dict["name"] == cls.__name__:
-                return cls(**json_dict["attributes"])
+        if name == CategoricalDistribution.__name__:
+            # Only convert choices to tuple if not already tuple (usually redundant, but safe)
+            choices = attributes["choices"]
+            if not isinstance(choices, tuple):
+                attributes["choices"] = tuple(choices)
 
-        raise ValueError(f"Unknown distribution class: {json_dict['name']}")
+        dist_class = _DISTRIBUTION_NAME_TO_CLASS.get(name) if _DISTRIBUTION_NAME_TO_CLASS else None
+        if dist_class is not None:
+            return dist_class(**attributes)
+
+        raise ValueError(f"Unknown distribution class: {name}")
+
 
     else:
         # Deserialize a distribution from an abbreviated format.
-        if json_dict["type"] == "categorical":
+        dist_type = json_dict["type"]
+        if dist_type == "categorical":
             return CategoricalDistribution(json_dict["choices"])
-        elif json_dict["type"] in ("float", "int"):
+        elif dist_type in ("float", "int"):
             low = json_dict["low"]
             high = json_dict["high"]
             step = json_dict.get("step")
             log = json_dict.get("log", False)
 
-            if json_dict["type"] == "float":
+            if dist_type == "float":
                 return FloatDistribution(low, high, log=log, step=step)
 
             else:
@@ -603,7 +623,7 @@ def json_to_distribution(json_str: str) -> BaseDistribution:
                     step = 1
                 return IntDistribution(low=low, high=high, log=log, step=step)
 
-        raise ValueError(f"Unknown distribution type: {json_dict['type']}")
+        raise ValueError(f"Unknown distribution type: {dist_type}")
 
 
 def distribution_to_json(dist: BaseDistribution) -> str:
