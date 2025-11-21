@@ -112,7 +112,8 @@ sb = Polynomial([1, sb1, sb2, sb3, sb4, sb5, sb6, sb7])
 def _erf_right_non_big(x: np.ndarray) -> np.ndarray:
     assert len(x.shape) == 1, "Input must be a 1D array."
     # NOTE(nabenabe): Add [6] to the list and use out = np.ones_like(x) to handle the big case.
-    bin_inds = np.count_nonzero(x >= [[2**-28], [0.84375], [1.25], [1 / 0.35]], axis=0)
+    boundaries = np.array([2**-28, 0.84375, 1.25, 1 / 0.35], dtype=x.dtype)
+    bin_inds = np.searchsorted(boundaries, x, side="right")
     out = np.empty_like(x)
     erf_approx_in_each_bin: list[Callable[[np.ndarray], np.ndarray]] = [
         lambda x: (1 + efx) * x,  # Tiny: x < 2**-28.
