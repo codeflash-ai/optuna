@@ -404,6 +404,7 @@ class JournalStorage(BaseStorage):
 
 
 class JournalStorageReplayResult:
+
     def __init__(self, worker_id_prefix: str) -> None:
         self.log_number_read = 0
         self._worker_id_prefix = worker_id_prefix
@@ -443,9 +444,10 @@ class JournalStorageReplayResult:
                 assert False, "Should not reach."
 
     def get_study(self, study_id: int) -> FrozenStudy:
-        if study_id not in self._studies:
+        try:
+            return self._studies[study_id]
+        except KeyError:
             raise KeyError(NOT_FOUND_MSG)
-        return self._studies[study_id]
 
     def get_all_studies(self) -> list[FrozenStudy]:
         return list(self._studies.values())
