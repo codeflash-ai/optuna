@@ -40,20 +40,31 @@ class _QuantileFilter:
     def filter(self, trials: list[FrozenTrial]) -> list[FrozenTrial]:
         target, min_n_top_trials = self._target, self._min_n_top_trials
         sign = 1.0 if self._is_lower_better else -1.0
-        loss_values = sign * np.asarray([t.value if target is None else target(t) for t in trials])
+
+        # Use generator for value extraction, avoid unnecessary intermediate list.
+        loss_values = sign * np.fromiter(
+            (t.value if target is None else target(t) for t in trials),
+            dtype=float,
+            count=len(trials),
+        )
         err_msg = "len(trials) must be larger than or equal to min_n_top_trials"
         assert min_n_top_trials <= loss_values.size, err_msg
 
-        def _quantile(v: np.ndarray, q: float) -> float:
-            cutoff_index = int(np.ceil(q * loss_values.size)) - 1
-            return float(np.partition(loss_values, cutoff_index)[cutoff_index])
+        # Move quantile logic to local, and avoid repeated partitioning.
+        q_cutoff_idx = int(np.ceil(self._quantile * loss_values.size)) - 1
+        min_top_idx = min_n_top_trials - 1
 
-        cutoff_val = max(
-            np.partition(loss_values, min_n_top_trials - 1)[min_n_top_trials - 1],
-            # TODO(nabenabe0928): After dropping Python3.10, replace below with
-            # np.quantile(loss_values, self._quantile, method="inverted_cdf").
-            _quantile(loss_values, self._quantile),
-        )
+        # Use single partition for sort indices if possible, to reduce computation.
+        if q_cutoff_idx >= min_top_idx:
+            partition_idx = q_cutoff_idx
+        else:
+            partition_idx = min_top_idx
+
+        partitioned = np.partition(loss_values, partition_idx)
+        quantile_val = float(partitioned[q_cutoff_idx])
+        min_top_val = float(partitioned[min_top_idx])
+        cutoff_val = max(min_top_val, quantile_val)
+
         should_keep_trials = loss_values <= cutoff_val
         return [t for t, should_keep in zip(trials, should_keep_trials) if should_keep]
 
