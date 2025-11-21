@@ -8,6 +8,7 @@ import numpy as np
 
 from optuna.search_space import intersection_search_space
 from optuna.trial import TrialState
+from operator import itemgetter
 
 
 if TYPE_CHECKING:
@@ -176,10 +177,4 @@ def _get_target_values(
 
 
 def _sort_dict_by_importance(param_importances: dict[str, float]) -> dict[str, float]:
-    return dict(
-        reversed(
-            sorted(
-                param_importances.items(), key=lambda name_and_importance: name_and_importance[1]
-            )
-        )
-    )
+    return dict(sorted(param_importances.items(), key=itemgetter(1), reverse=True))
