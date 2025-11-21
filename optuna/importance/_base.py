@@ -159,10 +159,12 @@ def _get_filtered_trials(
 def _param_importances_to_dict(
     params: Collection[str], param_importances: np.ndarray | float
 ) -> dict[str, float]:
-    return {
-        name: value
-        for name, value in zip(params, np.broadcast_to(param_importances, (len(params),)))
-    }
+    n = len(params)
+    if isinstance(param_importances, np.ndarray) and param_importances.shape == (n,):
+        return dict(zip(params, param_importances))
+    else:
+        broadcast_values = np.broadcast_to(param_importances, (n,))
+        return dict(zip(params, broadcast_values))
 
 
 def _get_trans_params(trials: list[FrozenTrial], trans: _SearchSpaceTransform) -> np.ndarray:
