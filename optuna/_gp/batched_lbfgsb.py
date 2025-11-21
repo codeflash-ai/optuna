@@ -6,6 +6,7 @@ import numpy as np
 
 from optuna._imports import try_import
 from optuna.logging import get_logger
+from greenlet import greenlet
 
 
 with try_import() as _greenlet_imports:
@@ -49,13 +50,17 @@ def _batched_lbfgsb(
     fvals_opt = np.empty(batch_size, dtype=float)
     n_iterations = np.empty(batch_size, dtype=int)
 
+    so_fmin_l_bfgs_b = so.fmin_l_bfgs_b
+    getcurrent_greenlet = greenlet.getcurrent
+
     def run(i: int) -> None:
         def _func_and_grad(x: np.ndarray, *args: Any) -> tuple[float, np.ndarray]:
-            fval, grad = greenlet.getcurrent().parent.switch(x, args)
+            fval, grad = getcurrent_greenlet().parent.switch(x, args)
+            # NOTE(nabenabe): copy is necessary to convert grad to writable.
             # NOTE(nabenabe): copy is necessary to convert grad to writable.
             return float(fval), grad.copy()
 
-        x_opt, fval_opt, info = so.fmin_l_bfgs_b(
+        x_opt, fval_opt, info = so_fmin_l_bfgs_b(
             func=_func_and_grad,
             x0=x0_batched[i],
             args=tuple(arg[i] for arg in batched_args),
@@ -70,18 +75,27 @@ def _batched_lbfgsb(
         xs_opt[i] = x_opt
         fvals_opt[i] = fval_opt
         n_iterations[i] = info["nit"]
-        greenlet.getcurrent().parent.switch(None, None)
+        getcurrent_greenlet().parent.switch(None, None)
 
     greenlets = [greenlet(run) for _ in range(batch_size)]
     x_and_args_list = [gl.switch(i) for i, gl in enumerate(greenlets)]
-    x_batched = np.array([x for x, _ in x_and_args_list if x is not None])
-    batched_args = tuple(zip(*[args for _, args in x_and_args_list if args is not None]))
-    while x_batched.size:
+    # No behavior change, but more efficient: only construct arrays/lists for active greenlets
+    x_and_args_non_none = [
+        (x, args, gl) for (x, args), gl in zip(x_and_args_list, greenlets) if x is not None
+    ]
+    while x_and_args_non_none:
+        x_batched = np.array([x for (x, _, _) in x_and_args_non_none])
+        batched_args = tuple(zip(*[args for (_, args, _) in x_and_args_non_none]))
         fvals, grads = func_and_grad(x_batched, *batched_args)
-        x_and_args_list = [gl.switch(fvals[i], grads[i]) for i, gl in enumerate(greenlets)]
-        x_batched = np.array([x for x, _ in x_and_args_list if x is not None])
-        batched_args = tuple(zip(*[args for _, args in x_and_args_list if args is not None]))
-        greenlets = [gl for (x, _), gl in zip(x_and_args_list, greenlets) if x is not None]
+        x_and_args_list = [
+            gl.switch(fvals[i], grads[i]) for i, (_, _, gl) in enumerate(x_and_args_non_none)
+        ]
+        # Update for the next batch: filter out finished greenlets at the same time
+        x_and_args_non_none = [
+            (x, args, gl)
+            for (x, args), (_, _, gl) in zip(x_and_args_list, x_and_args_non_none)
+            if x is not None
+        ]
 
     return xs_opt, fvals_opt, n_iterations
 
@@ -122,7 +136,12 @@ def batched_lbfgsb(
         2,
     ), f"The shape of bounds must be ({dim=}, 2), but got {np.shape(bounds)}."
 
-    if _greenlet_imports.is_successful() and len(x0_batched) > 1:
+    # Cache frequently accessed global in scope to reduce repeated attribute lookup in fallback
+    x0_batched_len = batch_size
+    so_fmin_l_bfgs_b = so.fmin_l_bfgs_b
+
+    if _greenlet_imports.is_successful() and x0_batched_len > 1:
+        # NOTE(Kaichi-Irie): when batch size is 1, using greenlet causes context-switch overhead.
         # NOTE(Kaichi-Irie): when batch size is 1, using greenlet causes context-switch overhead.
         xs_opt, fvals_opt, n_iterations = _batched_lbfgsb(
             func_and_grad=func_and_grad,
@@ -148,10 +167,10 @@ def batched_lbfgsb(
             return fval.item(), grad[0].copy()
 
         xs_opt = np.empty_like(x0_batched)
-        fvals_opt = np.empty(x0_batched.shape[0], dtype=float)
-        n_iterations = np.empty(x0_batched.shape[0], dtype=int)
+        fvals_opt = np.empty(x0_batched_len, dtype=float)
+        n_iterations = np.empty(x0_batched_len, dtype=int)
         for i, x0 in enumerate(x0_batched):
-            xs_opt[i], fvals_opt[i], info = so.fmin_l_bfgs_b(
+            xs_opt[i], fvals_opt[i], info = so_fmin_l_bfgs_b(
                 func=_func_and_grad_wrapper,
                 x0=x0,
                 args=tuple(arg[i] for arg in batched_args),
