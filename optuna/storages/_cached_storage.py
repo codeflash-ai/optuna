@@ -121,6 +121,11 @@ class _CachedStorage(BaseStorage, BaseHeartbeat):
         return name
 
     def get_study_directions(self, study_id: int) -> list[StudyDirection]:
+        if study_id in self._studies:
+            directions = self._studies[study_id].directions
+            if directions is not None:
+                return directions
+
         with self._lock:
             if study_id in self._studies:
                 directions = self._studies[study_id].directions
