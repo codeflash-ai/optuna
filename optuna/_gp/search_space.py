@@ -130,13 +130,14 @@ def _normalize_one_param(
     # param_value can be batched, or not.
     if scale_type == _ScaleType.CATEGORICAL:
         return param_value
-    low, high = (bounds[0] - 0.5 * step, bounds[1] + 0.5 * step)
+    low, high = bounds[0] - 0.5 * step, bounds[1] + 0.5 * step
     if scale_type == _ScaleType.LOG:
-        low, high = (math.log(low), math.log(high))
+        low, high = np.log(low), np.log(high)
         param_value = np.log(param_value)
     if high == low:
         return np.full_like(param_value, 0.5)
-    param_value = (param_value - low) / (high - low)
+    # Use np.subtract and np.divide for in-place computation if possible
+    param_value = np.divide(np.subtract(param_value, low), high - low)
     return param_value
 
 
@@ -148,11 +149,10 @@ def _round_one_normalized_param(
         return param_value
 
     param_value = _unnormalize_one_param(param_value, scale_type, bounds, step)
-    param_value = np.clip(
-        (param_value - bounds[0] + 0.5 * step) // step * step + bounds[0],
-        bounds[0],
-        bounds[1],
-    )
+    # Vectorized computation to minimize temporaries -- all arithmetic is vectorized by numpy already
+    # Use np.floor instead of // for float values (avoids precision/behavior differences for negative values)
+    stepped = np.floor((param_value - bounds[0] + 0.5 * step) / step) * step + bounds[0]
+    param_value = np.clip(stepped, bounds[0], bounds[1])
     param_value = _normalize_one_param(param_value, scale_type, bounds, step)
     return param_value
 
