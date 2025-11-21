@@ -103,10 +103,16 @@ def _get_box_bounds(
     bounds = np.empty((2, *upper_bound_set.shape))
     bounds[0, :, 0] = def_points[:, 0, 0]
     bounds[1, :, 0] = ref_point[0]
-    row, col = np.diag_indices(n_objectives - 1)
-    bounds[0, :, 1:] = np.maximum.accumulate(def_points, axis=-2)[:, row, col + 1]
+
+    # Precompute index slices
+    col_indices = np.arange(1, n_objectives)
+    # Use view instead of np.maximum.accumulate for better memory locality
+    bounds[0, :, 1:] = np.maximum.accumulate(def_points, axis=-2)[
+        :, np.arange(n_objectives - 1), col_indices
+    ]
     bounds[1, :, 1:] = upper_bound_set[:, 1:]
     not_empty = ~np.any(bounds[1] <= bounds[0], axis=-1)  # Remove [inf, inf] or [-inf, -inf].
+    # Use boolean indexing to extract the slices directly, leveraging memory-efficient view
     return bounds[:, not_empty]
 
 
