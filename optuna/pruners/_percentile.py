@@ -15,7 +15,7 @@ from optuna.trial._state import TrialState
 def _get_best_intermediate_result_over_steps(
     trial: "optuna.trial.FrozenTrial", direction: StudyDirection
 ) -> float:
-    values = np.asarray(list(trial.intermediate_values.values()), dtype=float)
+    values = np.fromiter(trial.intermediate_values.values(), dtype=float, count=len(trial.intermediate_values))
     if direction == StudyDirection.MAXIMIZE:
         return np.nanmax(values)
     return np.nanmin(values)
