@@ -58,37 +58,43 @@ def plot_timeline(study: Study, n_recent_trials: int | None = None) -> "go.Figur
 
 
 def _get_max_datetime_complete(study: Study) -> datetime.datetime:
-    max_run_duration = max(
-        [
-            t.datetime_complete - t.datetime_start
-            for t in study.trials
-            if t.datetime_complete is not None and t.datetime_start is not None
-        ],
-        default=None,
-    )
-    if _is_running_trials_in_study(study, max_run_duration):
-        return datetime.datetime.now()
+    # One-pass loop through study.trials to minimize attribute accesses and iteration
+    max_run_duration = None
+    found_running_trial = False
+    now = datetime.datetime.now()
+    max_datetime_complete = None
 
-    return max(
-        [t.datetime_complete for t in study.trials if t.datetime_complete is not None],
-        default=datetime.datetime.now(),
-    )
+    for t in study.trials:
+        dt_start = t.datetime_start
+        dt_complete = t.datetime_complete
+        if dt_start is not None and dt_complete is not None:
+            duration = dt_complete - dt_start
+            if (max_run_duration is None) or (duration > max_run_duration):
+                max_run_duration = duration
+        if dt_complete is not None:
+            if (max_datetime_complete is None) or (dt_complete > max_datetime_complete):
+                max_datetime_complete = dt_complete
+
+    if _is_running_trials_in_study(study, max_run_duration):
+        return now
+
+    # Avoid recomputing datetime.datetime.now() as the default, use previously obtained now
+    return max_datetime_complete if max_datetime_complete is not None else now
 
 
 def _is_running_trials_in_study(study: Study, max_run_duration: datetime.timedelta | None) -> bool:
     running_trials = study.get_trials(states=(TrialState.RUNNING,), deepcopy=False)
     if max_run_duration is None:
-        return len(running_trials) > 0
+        return bool(running_trials)
 
     now = datetime.datetime.now()
-    # This heuristic is to check whether we have trials that were somehow killed,
-    # still remain as `RUNNING` in `study`.
-    return any(
-        now - t.datetime_start < 5 * max_run_duration
-        for t in running_trials
-        # MyPy redefinition: Running trial should have datetime_start.
-        if t.datetime_start is not None
-    )
+    # Avoid generator expressions over attributes when attribute is used repeatedly
+    for t in running_trials:
+        dt_start = t.datetime_start
+        if dt_start is not None:
+            if now - dt_start < 5 * max_run_duration:
+                return True
+    return False
 
 
 def _get_timeline_info(study: Study, n_recent_trials: int | None = None) -> _TimelineInfo:
