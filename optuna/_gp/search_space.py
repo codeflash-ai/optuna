@@ -115,12 +115,24 @@ def _unnormalize_one_param(
     # param_value can be batched, or not.
     if scale_type == _ScaleType.CATEGORICAL:
         return param_value
-    low, high = (bounds[0] - 0.5 * step, bounds[1] + 0.5 * step)
+
+    # Precompute low/high once, outside branch; use constant time arithmetic
+    low = bounds[0] - 0.5 * step
+    high = bounds[1] + 0.5 * step
+
+    # For LOG scale, cache log computations for possible reuse/broadcast
     if scale_type == _ScaleType.LOG:
-        low, high = (math.log(low), math.log(high))
-    param_value = param_value * (high - low) + low
-    if scale_type == _ScaleType.LOG:
+        # Use numpy for log to allow array-broadcastable performance
+        # However, low and high are always scalars here for bounds, so math.log is fine.
+        low_log = math.log(low)
+        high_log = math.log(high)
+        param_value = param_value * (high_log - low_log) + low_log
+        # np.exp is the only possible batch op here, always required for LOG
         param_value = np.exp(param_value)
+        return param_value
+
+    # LINEAR case, no exponential needed
+    param_value = param_value * (high - low) + low
     return param_value
 
 
