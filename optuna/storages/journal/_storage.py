@@ -415,6 +415,10 @@ class JournalStorageReplayResult:
         self._next_study_id: int = 0
         self._worker_id_to_owned_trial_id: dict[str, int] = {}
 
+
+        # Optimization: Maintain a set of study_names for fast existence checks
+        self._study_names: set[str] = set()
+
     def apply_logs(self, logs: Iterable[dict[str, Any]]) -> None:
         for log in logs:
             self.log_number_read += 1
@@ -488,9 +492,11 @@ class JournalStorageReplayResult:
 
     def _apply_create_study(self, log: dict[str, Any]) -> None:
         study_name = log["study_name"]
-        directions = [StudyDirection(d) for d in log["directions"]]
+        # Optimization: Convert to tuple and generator, slightly faster than list comprehensions
+        directions = tuple(StudyDirection(d) for d in log["directions"])
 
-        if study_name in [s.study_name for s in self._studies.values()]:
+        # Major Optimization: Use set for O(1) existence check instead of O(N) list
+        if study_name in self._study_names:
             if self._is_issued_by_this_worker(log):
                 raise DuplicatedStudyError(
                     "Another study with name '{}' already exists. "
@@ -512,6 +518,9 @@ class JournalStorageReplayResult:
             directions=directions,
         )
         self._study_id_to_trial_ids[study_id] = []
+
+        # Maintain a fast lookup set for study names
+        self._study_names.add(study_name)
 
     def _apply_delete_study(self, log: dict[str, Any]) -> None:
         study_id = log["study_id"]
