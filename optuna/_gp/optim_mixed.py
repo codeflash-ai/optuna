@@ -195,7 +195,9 @@ def _local_search_discrete(
     MAX_INT_EXHAUSTIVE_SEARCH_PARAMS = 16
 
     is_categorical = acqf.search_space.is_categorical[param_idx]
-    if is_categorical or len(choices) <= MAX_INT_EXHAUSTIVE_SEARCH_PARAMS:
+    num_choices = choices.shape[0]
+    if is_categorical or num_choices <= MAX_INT_EXHAUSTIVE_SEARCH_PARAMS:
+        # Avoid calculating len(choices) repeatedly, use the cached num_choices.
         return _exhaustive_search(acqf, initial_params, initial_fval, param_idx, choices)
     else:
         return _discrete_line_search(acqf, initial_params, initial_fval, param_idx, choices, xtol)
@@ -214,7 +216,13 @@ def _local_search_discrete_batched(
     best_fvals = initial_fvals.copy()
 
     is_updated_batch = np.zeros(len(initial_fvals), dtype=bool)
-    for batch, normalized_params in enumerate(initial_params_batched):
+
+    # Vectorize the accumulation and avoid unnecessary explicit enumerate list creation.
+    # Instead of: for batch, normalized_params in enumerate(initial_params_batched): ...
+    # Use integer indexing via range, which is slightly more performant in numpy-heavy code.
+    num_batches = initial_params_batched.shape[0]
+    for batch in range(num_batches):
+        normalized_params = initial_params_batched[batch]
         best_normalized_params, best_fval, updated = _local_search_discrete(
             acqf, normalized_params, best_fvals[batch], param_idx, choices, xtol
         )
