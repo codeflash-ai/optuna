@@ -51,10 +51,10 @@ def plot_timeline(study: Study, n_recent_trials: int | None = None) -> "Axes":
 
 
 def _get_state_name(bar_info: _TimelineBarInfo) -> str:
-    if bar_info.state == TrialState.COMPLETE and bar_info.infeasible:
+    state = bar_info.state
+    if state is TrialState.COMPLETE and bar_info.infeasible:
         return _INFEASIBLE_KEY
-    else:
-        return bar_info.state.name
+    return state.name
 
 
 def _get_timeline_plot(info: _TimelineInfo) -> "Axes":
