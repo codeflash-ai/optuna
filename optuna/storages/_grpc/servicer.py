@@ -33,6 +33,7 @@ DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 
 
 class OptunaStorageProxyService(api_pb2_grpc.StorageServiceServicer):
+
     def __init__(self, storage: BaseStorage) -> None:
         self._backend = storage
         self._lock = threading.Lock()
@@ -265,16 +266,17 @@ class OptunaStorageProxyService(api_pb2_grpc.StorageServiceServicer):
         request: api_pb2.SetTrialIntermediateValueRequest,
         context: grpc.ServicerContext,
     ) -> api_pb2.SetTrialIntermediateValueReply:
-        trial_id = request.trial_id
-        step = request.step
-        intermediate_value = request.intermediate_value
         try:
-            self._backend.set_trial_intermediate_value(trial_id, step, intermediate_value)
+            self._backend.set_trial_intermediate_value(
+                request.trial_id,
+                request.step,
+                request.intermediate_value,
+            )
         except KeyError as e:
             context.abort(code=grpc.StatusCode.NOT_FOUND, details=str(e))
         except UpdateFinishedTrialError as e:
             context.abort(code=grpc.StatusCode.FAILED_PRECONDITION, details=str(e))
-        return api_pb2.SetTrialIntermediateValueReply()
+        return self._SET_TRIAL_INTERMEDIATE_VALUE_REPLY
 
     def SetTrialUserAttribute(
         self,
