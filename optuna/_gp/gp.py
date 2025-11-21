@@ -266,21 +266,23 @@ class GPRegressor:
         )
 
         def loss_func(raw_params: np.ndarray) -> tuple[float, np.ndarray]:
-            raw_params_tensor = torch.from_numpy(raw_params).requires_grad_(True)
+            # Avoid implicit float32 conversion; keep computations in float64
+            raw_params_tensor = torch.from_numpy(raw_params).to(dtype=torch.float64).requires_grad_(True)
             with torch.enable_grad():  # type: ignore[no-untyped-call]
                 self.inverse_squared_lengthscales = torch.exp(raw_params_tensor[:n_params])
                 self.kernel_scale = torch.exp(raw_params_tensor[n_params])
-                self.noise_var = (
-                    torch.tensor(minimum_noise, dtype=torch.float64)
-                    if deterministic_objective
-                    else torch.exp(raw_params_tensor[n_params + 1]) + minimum_noise
-                )
+                if deterministic_objective:
+                    self.noise_var = torch.tensor(minimum_noise, dtype=torch.float64)
+                else:
+                    self.noise_var = torch.exp(raw_params_tensor[n_params + 1]) + minimum_noise
                 loss = -self.marginal_log_likelihood() - log_prior(self)
                 loss.backward()  # type: ignore
                 # scipy.minimize requires all the gradients to be zero for termination.
                 raw_noise_var_grad = raw_params_tensor.grad[n_params + 1]  # type: ignore
                 assert not deterministic_objective or raw_noise_var_grad == 0
-            return loss.item(), raw_params_tensor.grad.detach().numpy()  # type: ignore
+                grad_np = raw_params_tensor.grad.detach().numpy()
+            return loss.item(), grad_np
+
 
         with single_blas_thread_if_scipy_v1_15_or_newer():
             # jac=True means loss_func returns the gradient for gradient descent.
@@ -295,14 +297,13 @@ class GPRegressor:
         if not res.success:
             raise RuntimeError(f"Optimization failed: {res.message}")
 
-        raw_params_opt_tensor = torch.from_numpy(res.x)
+        raw_params_opt_tensor = torch.from_numpy(res.x).to(dtype=torch.float64)
         self.inverse_squared_lengthscales = torch.exp(raw_params_opt_tensor[:n_params])
         self.kernel_scale = torch.exp(raw_params_opt_tensor[n_params])
-        self.noise_var = (
-            torch.tensor(minimum_noise, dtype=torch.float64)
-            if deterministic_objective
-            else minimum_noise + torch.exp(raw_params_opt_tensor[n_params + 1])
-        )
+        if deterministic_objective:
+            self.noise_var = torch.tensor(minimum_noise, dtype=torch.float64)
+        else:
+            self.noise_var = minimum_noise + torch.exp(raw_params_opt_tensor[n_params + 1])
         self._cache_matrix()
         return self
 
