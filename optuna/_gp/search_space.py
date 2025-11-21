@@ -38,10 +38,12 @@ class SearchSpace:
         self,
         optuna_search_space: dict[str, BaseDistribution],
     ) -> None:
+        n = len(optuna_search_space)
         self._optuna_search_space = optuna_search_space
-        self._scale_types = np.empty(len(optuna_search_space), dtype=np.int64)
-        self._bounds = np.empty((len(optuna_search_space), 2), dtype=float)
-        self._steps = np.empty(len(optuna_search_space), dtype=float)
+        self._scale_types = np.empty(n, dtype=np.int64)
+        self._bounds = np.empty((n, 2), dtype=float)
+        self._steps = np.empty(n, dtype=float)
+        categorical_val = []
         for i, distribution in enumerate(optuna_search_space.values()):
             if isinstance(distribution, CategoricalDistribution):
                 self._scale_types[i] = _ScaleType.CATEGORICAL
@@ -51,8 +53,9 @@ class SearchSpace:
                 assert isinstance(distribution, (FloatDistribution, IntDistribution))
                 self._scale_types[i] = _ScaleType.LOG if distribution.log else _ScaleType.LINEAR
                 self._bounds[i, :] = (distribution.low, distribution.high)
-                self._steps[i] = distribution.step or 0.0
-        self.dim = len(optuna_search_space)
+                # Use float cast so that zero/None stays zero.
+                self._steps[i] = float(distribution.step) if distribution.step is not None else 0.0
+        self.dim = n
         # TODO: Make it an index array.
         self.is_categorical = self._scale_types == _ScaleType.CATEGORICAL
         # NOTE(nabenabe): MyPy Redefinition for NumPy v2.2.0. (Cast signed int to int)

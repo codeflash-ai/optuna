@@ -242,30 +242,45 @@ def local_search_mixed_batched(
         np.min(np.diff(choices), initial=np.inf) / 4
         for choices in choices_of_discrete_params
     ]
-    best_fvals = acqf.eval_acqf_no_grad((best_xs := xs0.copy()))
+    best_xs = xs0.copy()
+    best_fvals = acqf.eval_acqf_no_grad(best_xs)
     CONTINUOUS = -1
-    last_changed_dims = np.full(len(best_xs), CONTINUOUS, dtype=int)
-    remaining_inds = np.arange(len(best_xs))
+    last_changed_dims = np.full(best_xs.shape[0], CONTINUOUS, dtype=int)
+    remaining_inds = np.arange(best_xs.shape[0])
+
     for _ in range(max_iter):
-        best_xs[remaining_inds], best_fvals[remaining_inds], updated = _gradient_ascent_batched(
-            acqf, best_xs[remaining_inds], best_fvals[remaining_inds], cont_inds, lengthscales, tol
+        # Gradient ascent batched
+        cur_xs = best_xs[remaining_inds]
+        cur_fvals = best_fvals[remaining_inds]
+        new_xs, new_fvals, updated = _gradient_ascent_batched(
+            acqf, cur_xs, cur_fvals, cont_inds, lengthscales, tol
         )
-        last_changed_dims = np.where(updated, CONTINUOUS, last_changed_dims)
+        best_xs[remaining_inds] = new_xs
+        best_fvals[remaining_inds] = new_fvals
+        last_changed_dims[remaining_inds] = np.where(updated, CONTINUOUS, last_changed_dims[remaining_inds])
+
         for i, choices, xtol in zip(discrete_indices, choices_of_discrete_params, discrete_xtols):
-            last_changed_dims = last_changed_dims[~(is_converged := last_changed_dims == i)]
-            remaining_inds = remaining_inds[~is_converged]
+            # Only process the remaining sub-batch
+            is_not_converged = last_changed_dims[remaining_inds] != i
+            if not np.any(is_not_converged):
+                return best_xs, best_fvals
+            next_inds = remaining_inds[is_not_converged]
+            next_xs, next_fvals, updated = _local_search_discrete_batched(
+                acqf, best_xs[next_inds], best_fvals[next_inds], i, choices, xtol
+            )
+            best_xs[next_inds] = next_xs
+            best_fvals[next_inds] = next_fvals
+            last_changed_dims[next_inds] = np.where(updated, i, last_changed_dims[next_inds])
+            # Update remaining_inds (prune ones already converged)
+            converged_mask = last_changed_dims[remaining_inds] == i
+            remaining_inds = remaining_inds[~converged_mask]
+            last_changed_dims = last_changed_dims[~converged_mask]
             if remaining_inds.size == 0:
                 return best_xs, best_fvals
-            best_xs[remaining_inds], best_fvals[remaining_inds], updated = (
-                _local_search_discrete_batched(
-                    acqf, best_xs[remaining_inds], best_fvals[remaining_inds], i, choices, xtol
-                )
-            )
-            last_changed_dims = np.where(updated, i, last_changed_dims)
 
-        # Parameters not changed from the beginning or last changed dimension is continuous.
-        remaining_inds = remaining_inds[~(is_converged := last_changed_dims == CONTINUOUS)]
-        last_changed_dims = last_changed_dims[~is_converged]
+        is_still_searching = last_changed_dims != CONTINUOUS
+        remaining_inds = np.arange(best_xs.shape[0])[is_still_searching]
+        last_changed_dims = last_changed_dims[is_still_searching]
         if remaining_inds.size == 0:
             return best_xs, best_fvals
     else:
@@ -304,7 +319,14 @@ def optimize_acqf_mixed(
     # We use a modified roulette wheel selection to pick the initial param for each local search.
     probs = np.exp(f_vals - f_vals[max_i])
     probs[max_i] = 0.0  # We already picked the best param, so remove it from roulette.
-    probs /= probs.sum()
+    prob_sum = probs.sum()
+    if prob_sum > 0:
+        probs /= prob_sum
+    else:
+        # Degenerate case, fallback to uniform sampling.
+        probs = np.full_like(probs, 1.0 / len(probs))
+        probs[max_i] = 0.0
+
     n_non_zero_probs_improvement = int(np.count_nonzero(probs > 0.0))
     # n_additional_warmstart becomes smaller when study starts to converge.
     n_additional_warmstart = min(

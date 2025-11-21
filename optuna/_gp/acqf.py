@@ -103,7 +103,18 @@ class BaseAcquisitionFunc(ABC):
 
     def eval_acqf_no_grad(self, x: np.ndarray) -> np.ndarray:
         with torch.no_grad():
-            return self.eval_acqf(torch.from_numpy(x)).detach().numpy()
+            # Avoid unnecessary data copying by ensuring float32 directly
+            if not isinstance(x, np.ndarray):
+                x = np.array(x, dtype=np.float32, copy=False)
+            elif x.dtype != np.float32:
+                x = x.astype(np.float32, copy=False)
+            # Use .to() as torch.from_numpy accepts only CPU arrays
+            tx = torch.from_numpy(x)
+            out = self.eval_acqf(tx)
+            # If out is on GPU, move to cpu before np()
+            if out.device.type != "cpu":
+                out = out.cpu()
+            return out.detach().numpy()
 
     def eval_acqf_with_grad(self, x: np.ndarray) -> tuple[float, np.ndarray]:
         assert x.ndim == 1
