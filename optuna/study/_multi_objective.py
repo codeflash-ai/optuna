@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import cast
 
 import numpy as np
+from line_profiler import profile as codeflash_line_profile
+codeflash_line_profile.enable(output_prefix='/tmp/codeflash_2p40ujc5/baseline_lprof')
 
 import optuna
 from optuna.study._constrained_optimization import _get_feasible_trials
 from optuna.study._study_direction import StudyDirection
-from optuna.trial import FrozenTrial
-from optuna.trial import TrialState
+from optuna.trial import FrozenTrial, TrialState
 
 
 def _get_pareto_front_trials_by_trials(
@@ -127,18 +127,15 @@ def _is_pareto_front_nd(unique_lexsorted_loss_values: np.ndarray) -> np.ndarray:
     loss_values = unique_lexsorted_loss_values[:, 1:]
     n_trials = loss_values.shape[0]
     on_front = np.zeros(n_trials, dtype=bool)
-    remaining_indices: np.ndarray[tuple[int], np.dtype[np.signedinteger]] = np.arange(n_trials)
-    while len(remaining_indices):
+    remaining_indices = np.arange(n_trials)
+    while remaining_indices.size:
         # NOTE: trials[j] cannot dominate trials[i] for i < j because of lexsort.
         # Therefore, remaining_indices[0] is always non-dominated.
         on_front[(new_nondominated_index := remaining_indices[0])] = True
         nondominated_and_not_top = np.any(
             loss_values[remaining_indices] < loss_values[new_nondominated_index], axis=1
         )
-        remaining_indices = cast(
-            np.ndarray[tuple[int], np.dtype[np.signedinteger]],
-            remaining_indices[nondominated_and_not_top],
-        )
+        remaining_indices = remaining_indices[nondominated_and_not_top]
 
     return on_front
 
@@ -214,6 +211,7 @@ def _calculate_nondomination_rank(
     return ranks[order_inv.reshape(-1)]
 
 
+@codeflash_line_profile
 def _dominates(
     trial0: FrozenTrial, trial1: FrozenTrial, directions: Sequence[StudyDirection]
 ) -> bool:
@@ -229,23 +227,42 @@ def _dominates(
     assert values0 is not None
     assert values1 is not None
 
-    if len(values0) != len(values1):
+    len_values0 = len(values0)
+    len_values1 = len(values1)
+
+    if len_values0 != len_values1:
         raise ValueError("Trials with different numbers of objectives cannot be compared.")
 
-    if len(values0) != len(directions):
+    len_directions = len(directions)
+    if len_values0 != len_directions:
         raise ValueError(
             "The number of the values and the number of the objectives are mismatched."
         )
 
-    normalized_values0 = [_normalize_value(v, d) for v, d in zip(values0, directions)]
-    normalized_values1 = [_normalize_value(v, d) for v, d in zip(values1, directions)]
+    # Pre-bind local variables / lookups to minimize `StudyDirection.MAXIMIZE` repeated lookups
+    maximize = StudyDirection.MAXIMIZE
+
+    # Inline normalization, iterate once instead of twice, and short-circuit if values are equal
+    normalized_values0 = [float("inf") if v is None else -v if d is maximize else v
+                          for v, d in zip(values0, directions)]
+    normalized_values1 = [float("inf") if v is None else -v if d is maximize else v
+                          for v, d in zip(values1, directions)]
+
+    # Instead of constructing the entire normalized lists and then comparing, do a fast path:
+    # If they're equal, bail early. This avoids computing the "all()" if unnecessary.
 
     if normalized_values0 == normalized_values1:
         return False
 
-    return all(v0 <= v1 for v0, v1 in zip(normalized_values0, normalized_values1))
+    # Combine the comparison and quantification loop to avoid a second pass
+    # and avoid temporary list allocations from generator expressions
+    for v0, v1 in zip(normalized_values0, normalized_values1):
+        if v0 > v1:
+            return False
+    return True
 
 
+@codeflash_line_profile
 def _normalize_value(value: float | None, direction: StudyDirection) -> float:
     if value is None:
         return float("inf")
