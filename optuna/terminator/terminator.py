@@ -108,13 +108,18 @@ class Terminator(BaseTerminator):
             raise ValueError("`min_n_trials` is expected to be a positive integer.")
 
         self._improvement_evaluator = improvement_evaluator or RegretBoundEvaluator()
+        self._is_stagnation_evaluator = isinstance(
+            self._improvement_evaluator, BestValueStagnationEvaluator
+        )
         self._error_evaluator = error_evaluator or self._initialize_error_evaluator()
         self._min_n_trials = min_n_trials
 
     def _initialize_error_evaluator(self) -> BaseErrorEvaluator:
-        if isinstance(self._improvement_evaluator, BestValueStagnationEvaluator):
+        if self._is_stagnation_evaluator:
             return StaticErrorEvaluator(constant=0)
-        return CrossValidationErrorEvaluator()
+        if not hasattr(self, "_crossval_err_eval"):
+            self._crossval_err_eval = CrossValidationErrorEvaluator()
+        return self._crossval_err_eval
 
     def should_terminate(self, study: Study) -> bool:
         """Judge whether the study should be terminated based on the reported values."""
