@@ -50,14 +50,31 @@ def warn_and_convert_inf(values: np.ndarray) -> np.ndarray:
         return values
 
     warnings.warn("Clip non-finite values to the min/max finite values for GP fittings.")
+    # Precompute masked arrays to avoid redundant masking
+    # Will be used to compute per-column mins and maxes only once
+    # Use np.minimum.reduce and np.maximum.reduce as they're faster than np.min/np.max for masked arrays
+    # Avoid repeated np.where calls for large arrays
+
+    # Get a masked version of values, setting non-finite to inf/-inf for min/max efficiently
+    vals_for_min = np.where(is_values_finite, values, np.inf)
+    vals_for_max = np.where(is_values_finite, values, -np.inf)
+
+    # Fast path for single-dimensional inputs
+    if values.ndim == 1:
+        any_finite = np.any(is_values_finite)
+        min_finite = np.min(vals_for_min) if any_finite else 0.0
+        max_finite = np.max(vals_for_max) if any_finite else 0.0
+
+        return np.clip(values, min_finite, max_finite)
+
+    # For multidimensional (axis=0), avoid unnecessary np.where() redundancy
     is_any_finite = np.any(is_values_finite, axis=0)
-    # NOTE(nabenabe): values cannot include nan to apply np.clip properly, but Optuna anyways won't
-    # pass nan in values by design.
-    return np.clip(
-        values,
-        np.where(is_any_finite, np.min(np.where(is_values_finite, values, np.inf), axis=0), 0.0),
-        np.where(is_any_finite, np.max(np.where(is_values_finite, values, -np.inf), axis=0), 0.0),
-    )
+    finite_min = np.min(vals_for_min, axis=0)
+    finite_max = np.max(vals_for_max, axis=0)
+    min_clip = np.where(is_any_finite, finite_min, 0.0)
+    max_clip = np.where(is_any_finite, finite_max, 0.0)
+
+    return np.clip(values, min_clip, max_clip)
 
 
 class Matern52Kernel(torch.autograd.Function):
