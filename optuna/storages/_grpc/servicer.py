@@ -27,6 +27,14 @@ else:
     api_pb2_grpc = _LazyImport("optuna.storages._grpc.auto_generated.api_pb2_grpc")
     grpc = _LazyImport("grpc")
 
+_PROTO_TO_TRIAL_STATE = {
+    api_pb2.RUNNING: TrialState.RUNNING,
+    api_pb2.COMPLETE: TrialState.COMPLETE,
+    api_pb2.PRUNED: TrialState.PRUNED,
+    api_pb2.FAIL: TrialState.FAIL,
+    api_pb2.WAITING: TrialState.WAITING,
+}
+
 
 _logger = logging.get_logger(__name__)
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
@@ -249,10 +257,15 @@ class OptunaStorageProxyService(api_pb2_grpc.StorageServiceServicer):
     ) -> api_pb2.SetTrialStateValuesReply:
         trial_id = request.trial_id
         state = request.state
-        values = list(request.values) if request.values else None
+        values = tuple(request.values) if request.values else None  # tuple minimizes memory use versus list
         try:
+            try:
+                trial_state = _PROTO_TO_TRIAL_STATE[state]
+            except KeyError:
+                raise ValueError(f"Unknown api_pb2.TrialState: {state}")
+
             trial_updated = self._backend.set_trial_state_values(
-                trial_id, _from_proto_trial_state(state), values
+                trial_id, trial_state, values
             )
         except KeyError as e:
             context.abort(code=grpc.StatusCode.NOT_FOUND, details=str(e))
