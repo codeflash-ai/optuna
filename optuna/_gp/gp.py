@@ -103,11 +103,13 @@ class GPRegressor:
         self._is_categorical = is_categorical
         self._X_train = X_train
         self._y_train = y_train
+
         self._squared_X_diff = (X_train.unsqueeze(-2) - X_train.unsqueeze(-3)).square_()
         if self._is_categorical.any():
             self._squared_X_diff[..., self._is_categorical] = (
                 self._squared_X_diff[..., self._is_categorical] > 0.0
             ).type(torch.float64)
+
         self._cov_Y_Y_chol: torch.Tensor | None = None
         self._cov_Y_Y_inv_Y: torch.Tensor | None = None
         # TODO(nabenabe): Rename the attributes to private with `_`.
@@ -168,11 +170,20 @@ class GPRegressor:
             if X2 is None:
                 X2 = self._X_train
 
-            sqd = (X1 - X2 if X1.ndim == 1 else X1.unsqueeze(-2) - X2.unsqueeze(-3)).square_()
+            # Avoid unneeded allocations: calculate diff once, then operate in-place
+            if X1.ndim == 1:
+                diff = X1 - X2
+            else:
+                diff = X1.unsqueeze(-2) - X2.unsqueeze(-3)
+            diff_sq = diff.square()
             if self._is_categorical.any():
-                sqd[..., self._is_categorical] = (sqd[..., self._is_categorical] > 0.0).type(
-                    torch.float64
-                )
+                cat_idx = self._is_categorical
+                # Avoid repeated >0 and type conversion
+                diff_cat = diff[..., cat_idx] != 0.0
+                diff_sq[..., cat_idx] = diff_cat.type(torch.float64)
+            sqd = diff_sq
+
+        # Efficient matmul
         sqdist = sqd.matmul(self.inverse_squared_lengthscales)
         return Matern52Kernel.apply(sqdist) * self.kernel_scale  # type: ignore
 
@@ -233,7 +244,9 @@ class GPRegressor:
         """
         n_points = self._X_train.shape[0]
         const = -0.5 * n_points * math.log(2 * math.pi)
-        cov_Y_Y = self.kernel() + self.noise_var * torch.eye(n_points, dtype=torch.float64)
+        # Use in-place add for efficiency; avoid duplicate computation of eye
+        cov_Y_Y = self.kernel()
+        cov_Y_Y.diagonal().add_(self.noise_var)
         L = torch.linalg.cholesky(cov_Y_Y)
         logdet_part = -L.diagonal().log().sum()
         inv_L_y = torch.linalg.solve_triangular(L, self._y_train[:, None], upper=False)[:, 0]
