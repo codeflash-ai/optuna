@@ -23,10 +23,10 @@ else:
     torch = _LazyImport("torch")
 
 
-_SQRT_HALF = math.sqrt(0.5)
-_INV_SQRT_2PI = 1 / math.sqrt(2 * math.pi)
-_SQRT_HALF_PI = math.sqrt(0.5 * math.pi)
-_LOG_SQRT_2PI = math.log(math.sqrt(2 * math.pi))
+_SQRT_HALF = 0.7071067811865476
+_INV_SQRT_2PI = 0.3989422804014327
+_SQRT_HALF_PI = 1.2533141373155001
+_LOG_SQRT_2PI = 0.9189385332046727
 _EPS = 1e-12  # NOTE(nabenabe): grad becomes nan when EPS=0.
 
 
@@ -73,23 +73,28 @@ def standard_logei(z: torch.Tensor) -> torch.Tensor:
     """
     # First condition (most z falls into this condition, so we calculate it first)
     # NOTE: ei(z) = z * cdf(z) + pdf(z)
-    out = (
-        (z_half := 0.5 * z) * torch.special.erfc(-_SQRT_HALF * z)  # z * cdf(z)
-        + (-z_half * z).exp() * _INV_SQRT_2PI  # pdf(z)
-    ).log()
-    if (z_small := z[(small := z < -25)]).numel():
+    z_half = 0.5 * z
+    # Use torch.special.erfc and torch.exp directly for improved efficiency
+    erfc_neg = torch.special.erfc(-_SQRT_HALF * z)
+    exp_term = torch.exp(-z_half * z)
+    out = (z_half * erfc_neg + exp_term * _INV_SQRT_2PI).log()
+    small = z < -25
+    if torch.any(small):
         # Second condition (does not happen often, so we calculate it only if necessary)
-        out[small] = (
-            -0.5 * z_small**2
-            - _LOG_SQRT_2PI
-            + (1 + _SQRT_HALF_PI * z_small * torch.special.erfcx(-_SQRT_HALF * z_small)).log()
-        )
+        z_small = z[small]
+        erfcx_term = torch.special.erfcx(-_SQRT_HALF * z_small)
+        out_cond = (-0.5 * z_small**2
+                    - _LOG_SQRT_2PI
+                    + torch.log1p(_SQRT_HALF_PI * z_small * erfcx_term))
+        out = out.clone()  # Only clone if we modify the output
+        out[small] = out_cond
     return out
 
 
 def logei(mean: torch.Tensor, var: torch.Tensor, f0: float) -> torch.Tensor:
     # Return E_{y ~ N(mean, var)}[max(0, y-f0)]
-    return standard_logei((mean - f0) / (sigma := var.sqrt_())) + sigma.log()
+    sigma = var.sqrt_()
+    return standard_logei((mean - f0) / sigma) + sigma.log()
 
 
 class BaseAcquisitionFunc(ABC):
