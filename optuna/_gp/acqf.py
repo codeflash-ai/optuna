@@ -23,10 +23,10 @@ else:
     torch = _LazyImport("torch")
 
 
-_SQRT_HALF = math.sqrt(0.5)
-_INV_SQRT_2PI = 1 / math.sqrt(2 * math.pi)
-_SQRT_HALF_PI = math.sqrt(0.5 * math.pi)
-_LOG_SQRT_2PI = math.log(math.sqrt(2 * math.pi))
+_SQRT_HALF = 0.7071067811865476
+_INV_SQRT_2PI = 0.3989422804014337
+_SQRT_HALF_PI = 1.2533141373155001
+_LOG_SQRT_2PI = 0.9189385332046727
 _EPS = 1e-12  # NOTE(nabenabe): grad becomes nan when EPS=0.
 
 
@@ -71,19 +71,27 @@ def standard_logei(z: torch.Tensor) -> torch.Tensor:
 
     NOTE: We do not use the third condition because [-10**100, 10**100] is an overly high range.
     """
-    # First condition (most z falls into this condition, so we calculate it first)
-    # NOTE: ei(z) = z * cdf(z) + pdf(z)
-    out = (
-        (z_half := 0.5 * z) * torch.special.erfc(-_SQRT_HALF * z)  # z * cdf(z)
-        + (-z_half * z).exp() * _INV_SQRT_2PI  # pdf(z)
-    ).log()
-    if (z_small := z[(small := z < -25)]).numel():
-        # Second condition (does not happen often, so we calculate it only if necessary)
-        out[small] = (
-            -0.5 * z_small**2
-            - _LOG_SQRT_2PI
-            + (1 + _SQRT_HALF_PI * z_small * torch.special.erfcx(-_SQRT_HALF * z_small)).log()
-        )
+
+    # Vectorized computation: Preallocate out for both conditions
+    z_half = 0.5 * z
+
+    # Use out as dense tensor for all outputs
+    erfc_val = torch.special.erfc(-_SQRT_HALF * z)
+    pdf_val = (-z_half * z).exp() * _INV_SQRT_2PI
+    # For maximum speed, use addcmul if beneficial, but for clarity and compatibility, this is straightforward.
+    out = (z_half * erfc_val + pdf_val).log()
+
+    # Only do expensive computation for relevant indices
+    small = z < -25
+    if small.any():
+        z_small = z[small]
+        # The following lines are preserved for numerical stability, just process all relevant small values at once
+        erfcx_val = torch.special.erfcx(-_SQRT_HALF * z_small)
+        # "(1 + ...).log()" is numerically stable for very small z
+        upd = -0.5 * z_small**2 - _LOG_SQRT_2PI + (1 + _SQRT_HALF_PI * z_small * erfcx_val).log()
+        out = out.clone()  # torch does not guarantee advanced indexing won't share storage with out
+        out[small] = upd
+
     return out
 
 
