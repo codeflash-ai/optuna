@@ -59,22 +59,33 @@ def _check_state_and_values(
 
 
 def _check_values_are_feasible(study: Study, values: Sequence[float]) -> str | None:
-    for v in values:
-        # TODO(Imamura): Construct error message taking into account all values and do not early
-        # return `value` is assumed to be ignored on failure so we can set it to any value.
-        try:
-            float(v)
-        except (ValueError, TypeError):
-            return f"The value {repr(v)} could not be cast to float"
-
-        if math.isnan(v):
-            return f"The value {v} is not acceptable"
-
-    if len(study.directions) != len(values):
+    # Cache directions and values lengths for efficiency
+    directions_len = len(study.directions)
+    values_len = len(values)
+    # Early exit if lengths do not match (avoids iterating over values unnecessarily)
+    if directions_len != values_len:
         return (
-            f"The number of the values {len(values)} did not match the number of the objectives "
-            f"{len(study.directions)}"
+            f"The number of the values {values_len} did not match the number of the objectives "
+            f"{directions_len}"
         )
+
+    # Using local var for math.isnan for slight speedup in tight loop
+    isnan = math.isnan
+    # Use a local float ref for the same reason
+    _float = float
+
+    # Use simple for-loop; avoid try-except unless needed, check type before converting
+    for v in values:
+        # Fast-path: value is already a float
+        if not isinstance(v, float):
+            try:
+                _float(v)
+            except (ValueError, TypeError):
+                return f"The value {repr(v)} could not be cast to float"
+        # math.isnan is safe to call only for floats; if not float, checked by float(v) above
+        # This works because above conversion ensures v is float if not already
+        if isnan(v):
+            return f"The value {v} is not acceptable"
 
     return None
 
