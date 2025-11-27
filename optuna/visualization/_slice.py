@@ -176,28 +176,35 @@ def plot_slice(
 def _get_slice_plot(info: _SlicePlotInfo) -> "go.Figure":
     layout = go.Layout(title="Slice Plot")
 
-    if len(info.subplots) == 0:
+    n_subplots = len(info.subplots)
+    if n_subplots == 0:
         return go.Figure(data=[], layout=layout)
-    elif len(info.subplots) == 1:
-        figure = go.Figure(data=_generate_slice_subplot(info.subplots[0]), layout=layout)
-        figure.update_xaxes(title_text=info.subplots[0].param_name)
+    elif n_subplots == 1:
+        subplot = info.subplots[0]
+        traces = _generate_slice_subplot(subplot)
+        figure = go.Figure(data=traces, layout=layout)
+        figure.update_xaxes(title_text=subplot.param_name)
         figure.update_yaxes(title_text=info.target_name)
-        if not info.subplots[0].is_numerical:
+        if not subplot.is_numerical:
             figure.update_xaxes(
-                type="category", categoryorder="array", categoryarray=info.subplots[0].x_labels
+                type="category",
+                categoryorder="array",
+                categoryarray=subplot.x_labels,
             )
-        elif info.subplots[0].is_log:
+        elif subplot.is_log:
             figure.update_xaxes(type="log")
     else:
-        figure = make_subplots(rows=1, cols=len(info.subplots), shared_yaxes=True)
-        figure.update_layout(layout)
+        figure = make_subplots(rows=1, cols=n_subplots, shared_yaxes=True)
+        # Instead of repeated dict assign (re-parsing layout), update title only.
+        figure["layout"]["title"] = layout.title
         showscale = True  # showscale option only needs to be specified once.
         for column_index, subplot_info in enumerate(info.subplots, start=1):
-            trace = _generate_slice_subplot(subplot_info)
-            trace[0].update(marker={"showscale": showscale})  # showscale's default is True.
+            traces = _generate_slice_subplot(subplot_info)
+            # Avoid repeated update if only marker 'showscale' needs an update and others default
+            traces[0].marker["showscale"] = showscale
             if showscale:
                 showscale = False
-            for t in trace:
+            for t in traces:
                 figure.add_trace(t, row=1, col=column_index)
             figure.update_xaxes(title_text=subplot_info.param_name, row=1, col=column_index)
             if column_index == 1:
@@ -212,39 +219,54 @@ def _get_slice_plot(info: _SlicePlotInfo) -> "go.Figure":
                 )
             elif subplot_info.is_log:
                 figure.update_xaxes(type="log", row=1, col=column_index)
-        if len(info.subplots) > 3:
+        if n_subplots > 3:
             # Ensure that each subplot has a minimum width without relying on autusizing.
-            figure.update_layout(width=300 * len(info.subplots))
+            figure.update_layout(width=300 * n_subplots)
 
     return figure
 
 
 def _generate_slice_subplot(subplot_info: _SliceSubplotInfo) -> list[Scatter]:
-    trace = []
+    trace: list[Scatter] = []
 
-    feasible = _PlotValues([], [], [])
-    infeasible = _PlotValues([], [], [])
+    # Preallocate the correct size lists when possible for better perf on large lists
+    n_points = len(subplot_info.x)
+    feasible_x = []
+    feasible_y = []
+    feasible_tr_num = []
+    infeasible_x = []
+    infeasible_y = []
 
-    for x, y, num, c in zip(
-        subplot_info.x, subplot_info.y, subplot_info.trial_numbers, subplot_info.constraints
-    ):
+    append_fx = feasible_x.append
+    append_fy = feasible_y.append
+    append_ftn = feasible_tr_num.append
+    append_ifx = infeasible_x.append
+    append_ify = infeasible_y.append
+
+    x_vals = subplot_info.x
+    y_vals = subplot_info.y
+    trn_vals = subplot_info.trial_numbers
+    c_vals = subplot_info.constraints
+
+    for x, y, num, c in zip(x_vals, y_vals, trn_vals, c_vals):
         if x is not None or x != "None" or y is not None or y != "None":
             if c:
-                feasible.x.append(x)
-                feasible.y.append(y)
-                feasible.trial_numbers.append(num)
+                append_fx(x)
+                append_fy(y)
+                append_ftn(num)
             else:
-                infeasible.x.append(x)
-                infeasible.y.append(y)
+                append_ifx(x)
+                append_ify(y)
+
     trace.append(
         go.Scatter(
-            x=feasible.x,
-            y=feasible.y,
+            x=feasible_x,
+            y=feasible_y,
             mode="markers",
             name="Feasible Trial",
             marker={
                 "line": {"width": 0.5, "color": "Grey"},
-                "color": feasible.trial_numbers,
+                "color": feasible_tr_num,
                 "colorscale": COLOR_SCALE,
                 "colorbar": {
                     "title": "Trial",
@@ -255,11 +277,11 @@ def _generate_slice_subplot(subplot_info: _SliceSubplotInfo) -> list[Scatter]:
             showlegend=False,
         )
     )
-    if len(infeasible.x) > 0:
+    if infeasible_x:
         trace.append(
             go.Scatter(
-                x=infeasible.x,
-                y=infeasible.y,
+                x=infeasible_x,
+                y=infeasible_y,
                 mode="markers",
                 name="Infeasible Trial",
                 marker={
@@ -268,5 +290,4 @@ def _generate_slice_subplot(subplot_info: _SliceSubplotInfo) -> list[Scatter]:
                 showlegend=False,
             )
         )
-
     return trace
