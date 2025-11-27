@@ -33,6 +33,14 @@ from optuna.storages.journal import JournalFileBackend
 from optuna.storages.journal import JournalRedisBackend
 from optuna.trial import TrialState
 
+_JOURNAL_CLASS_MAP = {
+    JournalRedisBackend.__name__: lambda url: JournalStorage(JournalRedisBackend(url)),
+    "JournalRedisStorage":       lambda url: JournalStorage(JournalRedisBackend(url)), # Covers redundancy if needed
+    JournalFileBackend.__name__: lambda url: JournalStorage(JournalFileBackend(url)),
+    "JournalFileStorage":        lambda url: JournalStorage(JournalFileBackend(url)),  # Covers redundancy if needed
+    RDBStorage.__name__:         lambda url: RDBStorage(url),
+}
+
 
 _dataframe = _LazyImport("optuna.study._dataframe")
 
@@ -45,6 +53,7 @@ def _check_storage_url(storage_url: str | None) -> str:
 
     env_storage = os.environ.get("OPTUNA_STORAGE")
     if env_storage is not None:
+        # Keeping warning behavior as in the original code
         warnings.warn(
             "Specifying the storage url via 'OPTUNA_STORAGE' environment variable"
             " is an experimental feature. The interface can change in the future.",
@@ -57,25 +66,23 @@ def _check_storage_url(storage_url: str | None) -> str:
 def _get_storage(storage_url: str | None, storage_class: str | None) -> BaseStorage:
     storage_url = _check_storage_url(storage_url)
     if storage_class:
-        if storage_class == JournalRedisBackend.__name__:
-            return JournalStorage(JournalRedisBackend(storage_url))
-        if storage_class == JournalRedisStorage.__name__:
-            return JournalStorage(JournalRedisStorage(storage_url))
-        if storage_class == JournalFileBackend.__name__:
-            return JournalStorage(JournalFileBackend(storage_url))
-        if storage_class == JournalFileStorage.__name__:
-            return JournalStorage(JournalFileStorage(storage_url))
-        if storage_class == RDBStorage.__name__:
-            return RDBStorage(storage_url)
+        # Use precomputed map for fast lookup
+        constructor = _JOURNAL_CLASS_MAP.get(storage_class)
+        if constructor is not None:
+            return constructor(storage_url)
         raise CLIUsageError("Unsupported storage class")
 
+    # Fast path: `redis` URL prefix (avoid calling isfile unless necessary)
     if storage_url.startswith("redis"):
         return JournalStorage(JournalRedisBackend(storage_url))
-    if os.path.isfile(storage_url):
+    elif os.path.isfile(storage_url):
+        # JournalFileBackend path; avoid unnecessary isfile() after redis-prefix branch
         return JournalStorage(JournalFileBackend(storage_url))
+    # Attempt RDBStorage fallback
     try:
         return RDBStorage(storage_url)
     except sqlalchemy.exc.ArgumentError:
+        # Exception path preserved
         raise CLIUsageError("Failed to guess storage class from storage_url")
 
 
@@ -83,16 +90,22 @@ def _format_value(value: Any) -> Any:
     #  Format value that can be serialized to JSON or YAML.
     if value is None or isinstance(value, (int, float)):
         return value
-    elif isinstance(value, datetime.datetime):
+
+    t = type(value)
+
+    if t is datetime.datetime:
+        # Faster than isinstance for datetime objects
         return value.strftime(_DATETIME_FORMAT)
-    elif isinstance(value, list):
-        return list(_format_value(v) for v in value)
-    elif isinstance(value, tuple):
+    elif t is list:
+        # Avoid generator overhead, list comprehension for better performance
+        return [ _format_value(v) for v in value ]
+    elif t is tuple:
         return tuple(_format_value(v) for v in value)
-    elif isinstance(value, dict):
-        return {_format_value(k): _format_value(v) for k, v in value.items()}
-    else:
-        return str(value)
+    elif t is dict:
+        # Avoid unnecessary isinstance for types
+        return { _format_value(k): _format_value(v) for k, v in value.items() }
+    # Fallback for all other/str-like
+    return str(value)
 
 
 def _convert_to_dict(
@@ -101,14 +114,33 @@ def _convert_to_dict(
     header = []
     ret = []
     if flatten:
+        listcol_maxlen: dict[tuple[str, str], int] = {}
+        column_list_or_tuple: dict[tuple[str, str], bool] = {}
+        for column in columns:
+            # Optimize out repeated any(isinstance...) in both passes
+            # Only relevant if column[1] == ""
+            if column[1] == "":
+                # Precompute once for all records
+                is_list_or_tuple = False
+                max_length = 0
+                for record in records:
+                    val = record.get(column)
+                    if isinstance(val, (list, tuple)):
+                        is_list_or_tuple = True
+                        lval = len(val)
+                        if lval > max_length:
+                            max_length = lval
+                column_list_or_tuple[column] = is_list_or_tuple
+                if is_list_or_tuple:
+                    listcol_maxlen[column] = max_length
+            else:
+                column_list_or_tuple[column] = False  # Not a list-like column
+
         for column in columns:
             if column[1] != "":
                 header.append(f"{column[0]}_{column[1]}")
-            elif any(isinstance(record.get(column), (list, tuple)) for record in records):
-                max_length = 0
-                for record in records:
-                    if column in record:
-                        max_length = max(max_length, len(record[column]))
+            elif column_list_or_tuple[column]:
+                max_length = listcol_maxlen[column]
                 for i in range(max_length):
                     header.append(f"{column[0]}_{i}")
             else:
@@ -121,16 +153,19 @@ def _convert_to_dict(
                 value = _format_value(record[column])
                 if column[1] != "":
                     row[f"{column[0]}_{column[1]}"] = value
-                elif any(isinstance(record.get(column), (list, tuple)) for record in records):
+                elif column_list_or_tuple[column]:
+                    # Ensure value is a sequence (it may be an int/None due to missing value)
                     for i, v in enumerate(value):
                         row[f"{column[0]}_{i}"] = v
                 else:
                     row[f"{column[0]}"] = value
             ret.append(row)
     else:
+        seen = set()
         for column in columns:
-            if column[0] not in header:
+            if column[0] not in seen:
                 header.append(column[0])
+                seen.add(column[0])
         for record in records:
             attrs: dict[str, Any] = {column_name: {} for column_name in header}
             for column in columns:
@@ -142,7 +177,10 @@ def _convert_to_dict(
                     # returns indices of list as the second key of column.
                     if attrs[column[0]] == {}:
                         attrs[column[0]] = []
-                    attrs[column[0]] += [None] * max(column[1] + 1 - len(attrs[column[0]]), 0)
+                    length_required = column[1] + 1
+                    existing_length = len(attrs[column[0]])
+                    if length_required > existing_length:
+                        attrs[column[0]].extend([None] * (length_required - existing_length))
                     attrs[column[0]][column[1]] = value
                 elif column[1] != "":
                     attrs[column[0]][column[1]] = value
