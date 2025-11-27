@@ -75,14 +75,25 @@ def _get_slice_subplot_info(
         constraints=[],
     )
 
+    # Pre-bind values for speed
+    plot_info_x_append = plot_info.x.append
+    plot_info_y_append = plot_info.y.append
+    plot_info_trial_numbers_append = plot_info.trial_numbers.append
+    plot_info_constraints_append = plot_info.constraints.append
+
     for t in trials:
-        if param not in t.params:
+        param_value = t.params.get(param, None)
+        if param_value is None:
             continue
-        plot_info.x.append(t.params[param])
-        plot_info.y.append(target(t))
-        plot_info.trial_numbers.append(t.number)
+        plot_info_x_append(param_value)
+        plot_info_y_append(target(t))
+        plot_info_trial_numbers_append(t.number)
         constraints = t.system_attrs.get(_CONSTRAINTS_KEY)
-        plot_info.constraints.append(constraints is None or all([x <= 0.0 for x in constraints]))
+        # Avoid list creation if possible, use generator for all()
+        if constraints is None:
+            plot_info_constraints_append(True)
+        else:
+            plot_info_constraints_append(all(x <= 0.0 for x in constraints))
 
     return plot_info
 
