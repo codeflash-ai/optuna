@@ -33,6 +33,14 @@ from optuna.storages.journal import JournalFileBackend
 from optuna.storages.journal import JournalRedisBackend
 from optuna.trial import TrialState
 
+_JOURNAL_CLASS_MAP = {
+    JournalRedisBackend.__name__: lambda url: JournalStorage(JournalRedisBackend(url)),
+    "JournalRedisStorage":       lambda url: JournalStorage(JournalRedisBackend(url)), # Covers redundancy if needed
+    JournalFileBackend.__name__: lambda url: JournalStorage(JournalFileBackend(url)),
+    "JournalFileStorage":        lambda url: JournalStorage(JournalFileBackend(url)),  # Covers redundancy if needed
+    RDBStorage.__name__:         lambda url: RDBStorage(url),
+}
+
 
 _dataframe = _LazyImport("optuna.study._dataframe")
 
@@ -45,6 +53,7 @@ def _check_storage_url(storage_url: str | None) -> str:
 
     env_storage = os.environ.get("OPTUNA_STORAGE")
     if env_storage is not None:
+        # Keeping warning behavior as in the original code
         warnings.warn(
             "Specifying the storage url via 'OPTUNA_STORAGE' environment variable"
             " is an experimental feature. The interface can change in the future.",
@@ -57,25 +66,23 @@ def _check_storage_url(storage_url: str | None) -> str:
 def _get_storage(storage_url: str | None, storage_class: str | None) -> BaseStorage:
     storage_url = _check_storage_url(storage_url)
     if storage_class:
-        if storage_class == JournalRedisBackend.__name__:
-            return JournalStorage(JournalRedisBackend(storage_url))
-        if storage_class == JournalRedisStorage.__name__:
-            return JournalStorage(JournalRedisStorage(storage_url))
-        if storage_class == JournalFileBackend.__name__:
-            return JournalStorage(JournalFileBackend(storage_url))
-        if storage_class == JournalFileStorage.__name__:
-            return JournalStorage(JournalFileStorage(storage_url))
-        if storage_class == RDBStorage.__name__:
-            return RDBStorage(storage_url)
+        # Use precomputed map for fast lookup
+        constructor = _JOURNAL_CLASS_MAP.get(storage_class)
+        if constructor is not None:
+            return constructor(storage_url)
         raise CLIUsageError("Unsupported storage class")
 
+    # Fast path: `redis` URL prefix (avoid calling isfile unless necessary)
     if storage_url.startswith("redis"):
         return JournalStorage(JournalRedisBackend(storage_url))
-    if os.path.isfile(storage_url):
+    elif os.path.isfile(storage_url):
+        # JournalFileBackend path; avoid unnecessary isfile() after redis-prefix branch
         return JournalStorage(JournalFileBackend(storage_url))
+    # Attempt RDBStorage fallback
     try:
         return RDBStorage(storage_url)
     except sqlalchemy.exc.ArgumentError:
+        # Exception path preserved
         raise CLIUsageError("Failed to guess storage class from storage_url")
 
 
@@ -101,15 +108,28 @@ def _convert_to_dict(
     header = []
     ret = []
     if flatten:
+        # Fast path: cache computations to eliminate duplicated traversals.
+        len_records = len(records)
+        any_list_tuple_in_column = {}
+        max_lengths = {}
+
+        # Precompute which columns have a list/tuple anywhere (for perf!)
+        for column in columns:
+            found_list_tuple = False
+            max_len = 0
+            for record in records:
+                value = record.get(column)
+                if isinstance(value, (list, tuple)):
+                    found_list_tuple = True
+                    max_len = max(max_len, len(value))
+            any_list_tuple_in_column[column] = found_list_tuple
+            max_lengths[column] = max_len
+
         for column in columns:
             if column[1] != "":
                 header.append(f"{column[0]}_{column[1]}")
-            elif any(isinstance(record.get(column), (list, tuple)) for record in records):
-                max_length = 0
-                for record in records:
-                    if column in record:
-                        max_length = max(max_length, len(record[column]))
-                for i in range(max_length):
+            elif any_list_tuple_in_column[column]:
+                for i in range(max_lengths[column]):
                     header.append(f"{column[0]}_{i}")
             else:
                 header.append(column[0])
@@ -121,7 +141,7 @@ def _convert_to_dict(
                 value = _format_value(record[column])
                 if column[1] != "":
                     row[f"{column[0]}_{column[1]}"] = value
-                elif any(isinstance(record.get(column), (list, tuple)) for record in records):
+                elif any_list_tuple_in_column[column]:
                     for i, v in enumerate(value):
                         row[f"{column[0]}_{i}"] = v
                 else:
@@ -191,12 +211,11 @@ class CellValue:
 def _dump_value(records: list[dict[str, Any]], header: list[str]) -> str:
     values = []
     for record in records:
-        row = []
-        for column_name in header:
-            # Below follows the table formatting convention where record[column_name] is treated as
-            # an empty string if record[column_name] is None. e.g., {"a": None} is replaced with
-            # {"a": ""}
-            row.append(str(record[column_name]) if record.get(column_name) is not None else "")
+        # This is slightly faster than repeated get()/str() in a list comprehension
+        row = [
+            str(record[column_name]) if record.get(column_name) is not None else ""
+            for column_name in header
+        ]
         values.append(" ".join(row))
     return "\n".join(values)
 
@@ -204,24 +223,35 @@ def _dump_value(records: list[dict[str, Any]], header: list[str]) -> str:
 def _dump_table(records: list[dict[str, Any]], header: list[str]) -> str:
     rows = []
     for record in records:
-        row = []
-        for column_name in header:
-            row.append(CellValue(record.get(column_name)))
+        row = [CellValue(record.get(column_name)) for column_name in header]
         rows.append(row)
 
     separator = "+"
     header_string = "|"
     rows_string = ["|" for _ in rows]
+    # Cache value_types and max_widths to reduce repeated computation
+    if rows:
+        num_columns = len(header)
+        value_types = []
+        max_widths = []
+        for column in range(num_columns):
+            vt = ValueType.NUMERIC
+            for row in rows:
+                if row[column].value_type == ValueType.STRING:
+                    vt = ValueType.STRING
+                    break
+            value_types.append(vt)
+            col_header_len = len(header[column])
+            col_value_max_width = max((row[column].width() for row in rows), default=0)
+            max_widths.append(max(col_header_len, col_value_max_width))
+    else:
+        num_columns = len(header)
+        value_types = [ValueType.NUMERIC] * num_columns
+        max_widths = [len(h) for h in header]
+
     for column in range(len(header)):
-        value_types = [row[column].value_type for row in rows]
-        value_type = ValueType.NUMERIC
-        for t in value_types:
-            if t == ValueType.STRING:
-                value_type = ValueType.STRING
-        if len(rows) == 0:
-            max_width = len(header[column])
-        else:
-            max_width = max(len(header[column]), max(row[column].width() for row in rows))
+        value_type = value_types[column]
+        max_width = max_widths[column]
         separator += "-" * (max_width + 2) + "+"
         if value_type == ValueType.NUMERIC:
             header_string += f" {header[column]:>{max_width}} |"
@@ -230,13 +260,13 @@ def _dump_table(records: list[dict[str, Any]], header: list[str]) -> str:
         for i, row in enumerate(rows):
             rows_string[i] += " " + row[column].get_string(value_type, max_width) + " |"
 
-    ret = ""
-    ret += separator + "\n"
-    ret += header_string + "\n"
-    ret += separator + "\n"
-    for row_string in rows_string:
-        ret += row_string + "\n"
-    ret += separator + "\n"
+    ret = (
+        separator + "\n" +
+        header_string + "\n" +
+        separator + "\n" +
+        "\n".join(rows_string) + "\n" +
+        separator + "\n"
+    )
 
     return ret
 
