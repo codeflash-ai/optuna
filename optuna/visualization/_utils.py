@@ -74,7 +74,7 @@ def _is_log_scale(trials: list[FrozenTrial], param: str) -> bool:
         if param not in trial.params:
             continue
         dist = trial.distributions[param]
-        return isinstance(dist, (FloatDistribution, IntDistribution)) and dist.log
+        return (type(dist) is FloatDistribution or type(dist) is IntDistribution) and dist.log
     return False
 
 
