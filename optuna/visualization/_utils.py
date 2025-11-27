@@ -178,6 +178,23 @@ def _is_reverse_scale(study: Study, target: Callable[[FrozenTrial], float] | Non
 
 
 def _make_json_compatible(value: Any) -> Any:
+    # Fast path for basic JSON-encodable types (avoid calling json.dumps when possible)
+    if (
+        value is None
+        or isinstance(value, (str, int, float, bool))
+        or (
+            isinstance(value, (list, tuple))
+            and all(isinstance(x, (str, int, float, bool, type(None))) for x in value)
+        )
+        or (
+            isinstance(value, dict)
+            and all(
+                isinstance(k, str) and isinstance(v, (str, int, float, bool, type(None)))
+                for k, v in value.items()
+            )
+        )
+    ):
+        return value
     try:
         json.dumps(value)
         return value
@@ -187,15 +204,19 @@ def _make_json_compatible(value: Any) -> Any:
 
 
 def _make_hovertext(trial: FrozenTrial) -> str:
-    user_attrs = {key: _make_json_compatible(value) for key, value in trial.user_attrs.items()}
-    user_attrs_dict = {"user_attrs": user_attrs} if user_attrs else {}
-    text = json.dumps(
-        {
-            "number": trial.number,
-            "values": trial.values,
-            "params": trial.params,
-            **user_attrs_dict,
-        },
-        indent=2,
-    )
+    attrs = trial.user_attrs
+    if attrs:
+        user_attrs = {}
+        for key, value in attrs.items():
+            user_attrs[key] = _make_json_compatible(value)
+        user_attrs_dict = {"user_attrs": user_attrs}
+    else:
+        user_attrs_dict = {}
+    obj = {
+        "number": trial.number,
+        "values": trial.values,
+        "params": trial.params,
+        **user_attrs_dict,
+    }
+    text = json.dumps(obj, indent=2)
     return text.replace("\n", "<br>")
