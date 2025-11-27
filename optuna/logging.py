@@ -37,22 +37,30 @@ def create_default_formatter() -> logging.Formatter:
     header = "[%(levelname)1.1s %(asctime)s]"
     message = "%(message)s"
     if _color_supported():
-        return colorlog.ColoredFormatter(
-            f"%(log_color)s{header}%(reset)s {message}",
-        )
-    return logging.Formatter(f"{header} {message}")
+        # Use a singleton ColoredFormatter to save construction overhead,
+        # since the formatter is stateless and style string doesn't vary.
+        if not hasattr(create_default_formatter, "_color_formatter"):
+            create_default_formatter._color_formatter = colorlog.ColoredFormatter(
+                f"%(log_color)s{header}%(reset)s {message}"
+            )
+        return create_default_formatter._color_formatter
+    # Use a singleton non-color formatter as well, as above
+    if not hasattr(create_default_formatter, "_plain_formatter"):
+        create_default_formatter._plain_formatter = logging.Formatter(f"{header} {message}")
+    return create_default_formatter._plain_formatter
 
 
 def _color_supported() -> bool:
     """Detection of color support."""
-    # NO_COLOR environment variable:
-    if os.environ.get("NO_COLOR", None):
+    # Check NO_COLOR environment variable (do not cache, must check fresh)
+    if "NO_COLOR" in os.environ:
         return False
 
-    if not hasattr(sys.stderr, "isatty") or not sys.stderr.isatty():
-        return False
-    else:
-        return True
+    # Fast path: check isatty only if available
+    stderr = sys.stderr
+    if hasattr(stderr, "isatty"):
+        return stderr.isatty()
+    return False
 
 
 def _get_library_name() -> str:
