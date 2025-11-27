@@ -86,7 +86,12 @@ def _get_improvement_info(
     improvement_evaluator: BaseImprovementEvaluator | None = None,
     error_evaluator: BaseErrorEvaluator | None = None,
 ) -> _ImprovementInfo:
-    if study._is_multi_objective():
+    # Small local caching for heavy attribute lookups
+    _is_multi_objective = study._is_multi_objective
+    _study_direction = study.direction
+    trials = study.trials
+
+    if _is_multi_objective():
         raise ValueError("This function does not support multi-objective optimization study.")
 
     if improvement_evaluator is None:
@@ -98,31 +103,46 @@ def _get_improvement_info(
             error_evaluator = CrossValidationErrorEvaluator()
 
     trial_numbers = []
-    completed_trials = []
     improvements = []
-    errors = []
+    errors = [] if get_error else None
 
-    for trial in tqdm.tqdm(study.trials):
-        if trial.state == optuna.trial.TrialState.COMPLETE:
+    # Single pass for completed trial accumulation
+    completed_trials = []
+    append_trial_number = trial_numbers.append
+    append_improvement = improvements.append
+    if get_error:
+        append_error = errors.append
+
+    trial_state_complete = optuna.trial.TrialState.COMPLETE
+
+    for trial in trials:
+        if trial.state == trial_state_complete:
             completed_trials.append(trial)
-
-        if len(completed_trials) == 0:
+        if not completed_trials:
             continue
 
-        trial_numbers.append(trial.number)
+        append_trial_number(trial.number)
 
-        improvement = improvement_evaluator.evaluate(
-            trials=completed_trials, study_direction=study.direction
+        # Only recalculate improvement for the current completed_trials
+        imp = improvement_evaluator.evaluate(
+            trials=completed_trials, study_direction=_study_direction
         )
-        improvements.append(improvement)
+        append_improvement(imp)
 
         if get_error:
-            error = error_evaluator.evaluate(
-                trials=completed_trials, study_direction=study.direction
+            err = error_evaluator.evaluate(
+                trials=completed_trials, study_direction=_study_direction
             )
-            errors.append(error)
+            append_error(err)
 
-    if len(errors) == 0:
+    if not improvements:  # No complete trials
+        return _ImprovementInfo(
+            trial_numbers=[],
+            improvements=[],
+            errors=None,
+        )
+
+    if errors is None:
         return _ImprovementInfo(
             trial_numbers=trial_numbers, improvements=improvements, errors=None
         )
