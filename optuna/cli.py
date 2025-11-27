@@ -33,6 +33,14 @@ from optuna.storages.journal import JournalFileBackend
 from optuna.storages.journal import JournalRedisBackend
 from optuna.trial import TrialState
 
+_JOURNAL_CLASS_MAP = {
+    JournalRedisBackend.__name__: lambda url: JournalStorage(JournalRedisBackend(url)),
+    "JournalRedisStorage":       lambda url: JournalStorage(JournalRedisBackend(url)), # Covers redundancy if needed
+    JournalFileBackend.__name__: lambda url: JournalStorage(JournalFileBackend(url)),
+    "JournalFileStorage":        lambda url: JournalStorage(JournalFileBackend(url)),  # Covers redundancy if needed
+    RDBStorage.__name__:         lambda url: RDBStorage(url),
+}
+
 
 _dataframe = _LazyImport("optuna.study._dataframe")
 
@@ -45,6 +53,7 @@ def _check_storage_url(storage_url: str | None) -> str:
 
     env_storage = os.environ.get("OPTUNA_STORAGE")
     if env_storage is not None:
+        # Keeping warning behavior as in the original code
         warnings.warn(
             "Specifying the storage url via 'OPTUNA_STORAGE' environment variable"
             " is an experimental feature. The interface can change in the future.",
@@ -57,25 +66,23 @@ def _check_storage_url(storage_url: str | None) -> str:
 def _get_storage(storage_url: str | None, storage_class: str | None) -> BaseStorage:
     storage_url = _check_storage_url(storage_url)
     if storage_class:
-        if storage_class == JournalRedisBackend.__name__:
-            return JournalStorage(JournalRedisBackend(storage_url))
-        if storage_class == JournalRedisStorage.__name__:
-            return JournalStorage(JournalRedisStorage(storage_url))
-        if storage_class == JournalFileBackend.__name__:
-            return JournalStorage(JournalFileBackend(storage_url))
-        if storage_class == JournalFileStorage.__name__:
-            return JournalStorage(JournalFileStorage(storage_url))
-        if storage_class == RDBStorage.__name__:
-            return RDBStorage(storage_url)
+        # Use precomputed map for fast lookup
+        constructor = _JOURNAL_CLASS_MAP.get(storage_class)
+        if constructor is not None:
+            return constructor(storage_url)
         raise CLIUsageError("Unsupported storage class")
 
+    # Fast path: `redis` URL prefix (avoid calling isfile unless necessary)
     if storage_url.startswith("redis"):
         return JournalStorage(JournalRedisBackend(storage_url))
-    if os.path.isfile(storage_url):
+    elif os.path.isfile(storage_url):
+        # JournalFileBackend path; avoid unnecessary isfile() after redis-prefix branch
         return JournalStorage(JournalFileBackend(storage_url))
+    # Attempt RDBStorage fallback
     try:
         return RDBStorage(storage_url)
     except sqlalchemy.exc.ArgumentError:
+        # Exception path preserved
         raise CLIUsageError("Failed to guess storage class from storage_url")
 
 
@@ -169,6 +176,10 @@ class CellValue:
         else:
             self.value_type = ValueType.STRING
 
+        # Cache string representation for faster repeated access in width()
+        # This does not change behavior, only optimizes repeated usage
+        self._str_value = str(self.value)
+
     def __str__(self) -> str:
         if isinstance(self.value, datetime.datetime):
             return self.value.strftime(_DATETIME_FORMAT)
@@ -176,7 +187,7 @@ class CellValue:
             return str(self.value)
 
     def width(self) -> int:
-        return len(str(self.value))
+        return len(self._str_value)
 
     def get_string(self, value_type: ValueType, width: int) -> str:
         value = str(self.value)
