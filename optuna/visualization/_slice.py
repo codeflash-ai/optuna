@@ -222,29 +222,44 @@ def _get_slice_plot(info: _SlicePlotInfo) -> "go.Figure":
 def _generate_slice_subplot(subplot_info: _SliceSubplotInfo) -> list[Scatter]:
     trace = []
 
-    feasible = _PlotValues([], [], [])
-    infeasible = _PlotValues([], [], [])
+    feasible_x = []
+    feasible_y = []
+    feasible_trial_numbers = []
+    infeasible_x = []
+    infeasible_y = []
 
-    for x, y, num, c in zip(
-        subplot_info.x, subplot_info.y, subplot_info.trial_numbers, subplot_info.constraints
-    ):
-        if x is not None or x != "None" or y is not None or y != "None":
+    append_fx = feasible_x.append
+    append_fy = feasible_y.append
+    append_ftn = feasible_trial_numbers.append
+    append_ix = infeasible_x.append
+    append_iy = infeasible_y.append
+
+    xs, ys, nums, cs = (
+        subplot_info.x,
+        subplot_info.y,
+        subplot_info.trial_numbers,
+        subplot_info.constraints,
+    )
+    for x, y, num, c in zip(xs, ys, nums, cs):
+        # Only filter out points that are actually None or "None" (as a string) for x or y.
+        if (x is not None and x != "None") and (y is not None and y != "None"):
             if c:
-                feasible.x.append(x)
-                feasible.y.append(y)
-                feasible.trial_numbers.append(num)
+                append_fx(x)
+                append_fy(y)
+                append_ftn(num)
             else:
-                infeasible.x.append(x)
-                infeasible.y.append(y)
+                append_ix(x)
+                append_iy(y)
+
     trace.append(
         go.Scatter(
-            x=feasible.x,
-            y=feasible.y,
+            x=feasible_x,
+            y=feasible_y,
             mode="markers",
             name="Feasible Trial",
             marker={
                 "line": {"width": 0.5, "color": "Grey"},
-                "color": feasible.trial_numbers,
+                "color": feasible_trial_numbers,
                 "colorscale": COLOR_SCALE,
                 "colorbar": {
                     "title": "Trial",
@@ -255,11 +270,11 @@ def _generate_slice_subplot(subplot_info: _SliceSubplotInfo) -> list[Scatter]:
             showlegend=False,
         )
     )
-    if len(infeasible.x) > 0:
+    if infeasible_x:
         trace.append(
             go.Scatter(
-                x=infeasible.x,
-                y=infeasible.y,
+                x=infeasible_x,
+                y=infeasible_y,
                 mode="markers",
                 name="Infeasible Trial",
                 marker={
