@@ -16,7 +16,7 @@ import os
 import random
 import sqlite3
 import time
-from typing import Any
+from typing import Optional, Any
 from typing import TYPE_CHECKING
 import uuid
 
@@ -1054,6 +1054,7 @@ class _VersionManager:
         self.url = url
         self.engine = engine
         self.scoped_session = scoped_session
+        self._alembic_script: Optional[alembic_script.ScriptDirectory] = None  # Cache for ScriptDirectory
         self._init_version_info_model()
         self._init_alembic()
 
@@ -1171,9 +1172,12 @@ class _VersionManager:
             return version_info.schema_version == models.SCHEMA_VERSION
 
     def _create_alembic_script(self) -> "alembic_script.ScriptDirectory":
-        config = self._create_alembic_config()
-        script = alembic_script.ScriptDirectory.from_config(config)
-        return script
+        # Cache the ScriptDirectory instance for reuse (thread safety is not a concern in current context)
+        if self._alembic_script is None:
+            config = self._create_alembic_config()
+            script = alembic_script.ScriptDirectory.from_config(config)
+            self._alembic_script = script
+        return self._alembic_script
 
     def _create_alembic_config(self) -> "alembic_config.Config":
         alembic_dir = os.path.join(os.path.dirname(__file__), "alembic")
