@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-from dataclasses import asdict
 from dataclasses import dataclass
 import json
 import mimetypes
@@ -87,29 +85,43 @@ def upload_artifact(
 
     filename = os.path.basename(file_path)
 
-    if isinstance(study_or_trial, Trial) and storage is None:
-        storage = study_or_trial.storage
-    elif isinstance(study_or_trial, Study) and storage is None:
-        storage = study_or_trial._storage
+    # Fast assignment of storage reference
+    if storage is None:
+        if isinstance(study_or_trial, Trial):
+            storage = study_or_trial.storage
+        elif isinstance(study_or_trial, Study):
+            storage = study_or_trial._storage
 
     if storage is None:
         raise ValueError("storage is required for FrozenTrial.")
 
     artifact_id = str(uuid.uuid4())
     guess_mimetype, guess_encoding = mimetypes.guess_type(filename)
-    artifact = ArtifactMeta(
-        artifact_id=artifact_id,
-        filename=filename,
-        mimetype=mimetype or guess_mimetype or DEFAULT_MIME_TYPE,
-        encoding=encoding or guess_encoding,
+    # Avoid unnecessary attribute lookups and expensive function calls
+    mimetype_val = (
+        mimetype
+        if mimetype is not None
+        else (guess_mimetype if guess_mimetype is not None else DEFAULT_MIME_TYPE)
     )
+    encoding_val = encoding if encoding is not None else guess_encoding
+
+    # Manually dict for artifact meta, as asdict() on simple objects is slower
+    # If ArtifactMeta is a standard dataclass with only basic fields, this is safe
+    artifact = {
+        "artifact_id": artifact_id,
+        "filename": filename,
+        "mimetype": mimetype_val,
+        "encoding": encoding_val,
+    }
     attr_key = ARTIFACTS_ATTR_PREFIX + artifact_id
     if isinstance(study_or_trial, (Trial, FrozenTrial)):
         trial_id = study_or_trial._trial_id
-        storage.set_trial_system_attr(trial_id, attr_key, json.dumps(asdict(artifact)))
+        storage.set_trial_system_attr(trial_id, attr_key, json.dumps(artifact))
     else:
         study_id = study_or_trial._study_id
-        storage.set_study_system_attr(study_id, attr_key, json.dumps(asdict(artifact)))
+        storage.set_study_system_attr(study_id, attr_key, json.dumps(artifact))
+
+    # Context manager is already optimal for file reading
 
     with open(file_path, "rb") as f:
         artifact_store.write(artifact_id, f)
