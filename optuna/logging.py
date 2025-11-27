@@ -56,7 +56,11 @@ def _color_supported() -> bool:
 
 
 def _get_library_name() -> str:
-    return __name__.split(".")[0]
+    name = __name__
+    dot_index = name.find(".")
+    if dot_index == -1:
+        return name
+    return name[:dot_index]
 
 
 def _get_library_root_logger() -> logging.Logger:
