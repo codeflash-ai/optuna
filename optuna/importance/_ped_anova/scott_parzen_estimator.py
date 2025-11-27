@@ -120,19 +120,27 @@ def _count_numerical_param_in_grid(
     n_grids, grid_indices_of_trials = _get_grids_and_grid_indices_of_trials(
         param_name, dist, trials, n_steps
     )
-    unique_vals, counts_in_unique = np.unique(grid_indices_of_trials, return_counts=True)
-    counts = np.zeros(n_grids, dtype=np.int32)
-    counts[unique_vals] += counts_in_unique
+    # Optimize count accumulation by using np.bincount with min_length parameter (since grid indices are always int)
+    # np.bincount is substantially faster than np.unique+np.zeros+in-place add for counting index occurrences
+    counts = np.bincount(grid_indices_of_trials, minlength=n_grids)
+    # Ensure output dtype matches original (np.int32)
+    if counts.dtype != np.int32:
+        counts = counts.astype(np.int32, copy=False)
     return counts
 
 
 def _count_categorical_param_in_grid(
     param_name: str, dist: CategoricalDistribution, trials: list[FrozenTrial]
 ) -> np.ndarray:
-    cat_indices = [int(dist.to_internal_repr(t.params[param_name])) for t in trials]
-    unique_vals, counts_in_unique = np.unique(cat_indices, return_counts=True)
-    counts = np.zeros(len(dist.choices), dtype=np.int32)
-    counts[unique_vals] += counts_in_unique
+    # Avoid Python list comprehension and int conversions per parameter by using numpy for bulk conversion and counting
+    # dist.to_internal_repr returns float, so collect directly into np.array for efficient single pass conversion
+    cat_indices = np.array(
+        [dist.to_internal_repr(t.params[param_name]) for t in trials], dtype=np.intp
+    )
+    counts = np.bincount(cat_indices, minlength=len(dist.choices))
+    # Ensure output dtype matches original (np.int32)
+    if counts.dtype != np.int32:
+        counts = counts.astype(np.int32, copy=False)
     return counts
 
 
