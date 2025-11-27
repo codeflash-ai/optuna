@@ -15,6 +15,12 @@ import threading
 import colorlog
 
 
+# Use a thread-safe, module-level cache for the root logger.
+# Once initialized, the logger config and level remain unchanged unless directly altered,
+# so cache the logger to avoid repeated `logging.getLogger` attribute lookups.
+_library_root_logger: logging.Logger | None = None
+
+
 __all__ = [
     "CRITICAL",
     "DEBUG",
@@ -60,12 +66,20 @@ def _get_library_name() -> str:
 
 
 def _get_library_root_logger() -> logging.Logger:
-    return logging.getLogger(_get_library_name())
+    global _library_root_logger
+    if _library_root_logger is not None:
+        return _library_root_logger
+    logger = logging.getLogger(_get_library_name())
+    _library_root_logger = logger
+    return logger
 
 
 def _configure_library_root_logger() -> None:
     global _default_handler
 
+    # Double-checked locking to minimize critical section
+    if _default_handler:
+        return
     with _lock:
         if _default_handler:
             # This library has already configured the library root logger.
