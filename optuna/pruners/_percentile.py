@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import KeysView
 import functools
 import math
+from collections.abc import KeysView
 
 import numpy as np
 
@@ -57,12 +57,12 @@ def _is_first_in_interval_step(
     ) // interval_steps * interval_steps + n_warmup_steps
     assert nearest_lower_pruning_step >= 0
 
-    # `intermediate_steps` may not be sorted so we must go through all elements.
-    second_last_step = functools.reduce(
-        lambda second_last_step, s: s if s > second_last_step and s != step else second_last_step,
-        intermediate_steps,
-        -1,
-    )
+    # Find the maximum intermediate step less than step, or -1 if none exist
+    second_last_step = -1
+    for s in intermediate_steps:
+        if s > second_last_step and s != step:
+            second_last_step = s
+
 
     return second_last_step < nearest_lower_pruning_step
 
