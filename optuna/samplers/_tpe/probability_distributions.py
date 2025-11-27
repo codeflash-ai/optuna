@@ -40,9 +40,7 @@ def _unique_inverse_2d(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.nda
         np.unique(np.concatenate([a[:, None], b[:, None]], axis=-1), return_inverse=True).
     """
     assert a.shape == b.shape and len(a.shape) == 1
-    order = np.argsort(b)
-    # Stable sorting is required for the tie breaking.
-    order = order[np.argsort(a[order], kind="stable")]
+    order = np.lexsort((b, a))
     a_order = a[order]
     b_order = b[order]
     is_first_occurrence = np.empty_like(a, dtype=bool)
