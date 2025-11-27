@@ -63,7 +63,13 @@ class Backoff:
         self._min_delay = min_delay
         self._max_delay = max_delay
 
+        # Precompute delays for all allowed retry steps for efficiency
+        self._sleep_secs = self._precompute_sleep_secs()
+
     def _get_sleep_secs(self, n_retry: int) -> float:
+        # Use precomputed result when within range, else fallback to the formula (safety)
+        if 0 <= n_retry < self._max_retries:
+            return self._sleep_secs[n_retry]
         return min(self._min_delay * self._multiplier**n_retry, self._max_delay)
 
     def open_reader(self, artifact_id: str) -> BinaryIO:
@@ -107,6 +113,13 @@ class Backoff:
                 else:
                     _logger.error(f"Failed to delete artifact={artifact_id}", exc_info=e)
             time.sleep(self._get_sleep_secs(i))
+
+    def _precompute_sleep_secs(self):
+        # Precompute the delay for each retry up to max_retries to avoid repeated pow/exp
+        return [
+            min(self._min_delay * self._multiplier**n, self._max_delay)
+            for n in range(self._max_retries)
+        ]
 
 
 if TYPE_CHECKING:
