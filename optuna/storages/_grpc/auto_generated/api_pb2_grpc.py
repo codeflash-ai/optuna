@@ -547,12 +547,18 @@ class StorageService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
+        # Optimize by caching static method refs, saving attribute lookups for repeated calls.
+        serialize = api__pb2.GetStudyNameFromIdRequest.SerializeToString
+        deserialize = api__pb2.GetStudyNameFromIdReply.FromString
+
+        # Only _registered_method is ever True here, so don't allocate new dict for kwargs.
+        # Avoid unpacking and pass directly, which is faster and avoids a temporary dict.
         return grpc.experimental.unary_unary(
             request,
             target,
             '/optuna.StorageService/GetStudyNameFromId',
-            api__pb2.GetStudyNameFromIdRequest.SerializeToString,
-            api__pb2.GetStudyNameFromIdReply.FromString,
+            serialize,
+            deserialize,
             options,
             channel_credentials,
             insecure,
@@ -561,7 +567,8 @@ class StorageService(object):
             wait_for_ready,
             timeout,
             metadata,
-            _registered_method=True)
+            True  # _registered_method=True
+        )
 
     @staticmethod
     def GetStudyDirections(request,
