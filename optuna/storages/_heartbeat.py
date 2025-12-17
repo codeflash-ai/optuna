@@ -188,4 +188,6 @@ def is_heartbeat_enabled(storage: BaseStorage) -> bool:
         and the return value of :meth:`~optuna.storages.BaseStorage.get_heartbeat_interval` is an
         integer, otherwise :obj:`False`.
     """
-    return isinstance(storage, BaseHeartbeat) and storage.get_heartbeat_interval() is not None
+    if not isinstance(storage, BaseHeartbeat):
+        return False
+    return storage.get_heartbeat_interval() is not None
