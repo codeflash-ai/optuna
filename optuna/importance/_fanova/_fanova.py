@@ -22,6 +22,7 @@ import numpy as np
 
 from optuna._imports import try_import
 from optuna.importance._fanova._tree import _FanovaTree
+from sklearn.ensemble import RandomForestRegressor
 
 
 with try_import() as _imports:
@@ -79,15 +80,16 @@ class _Fanova:
 
         self._compute_variances(feature)
 
-        fractions: list[float] | np.ndarray = []
-
-        for tree_index, tree in enumerate(self._trees):
+        # Avoid repeated numpy array re-allocations by using a Python list and converting ONCE.
+        fractions_list: list[float] = []
+        trees = self._trees
+        variances = self._variances[feature]
+        for tree_index, tree in enumerate(trees):
             tree_variance = tree.variance
             if tree_variance > 0.0:
-                fraction = self._variances[feature][tree_index] / tree_variance
-                fractions = np.append(fractions, fraction)
+                fractions_list.append(variances[tree_index] / tree_variance)
 
-        fractions = np.asarray(fractions)
+        fractions = np.asarray(fractions_list)
 
         return float(fractions.mean()), float(fractions.std())
 
@@ -100,9 +102,18 @@ class _Fanova:
             return
 
         raw_features = self._column_to_encoded_columns[feature]
-        variances = np.empty(len(self._trees), dtype=np.float64)
+        n_trees = len(self._trees)
+        variances = np.empty(n_trees, dtype=np.float64)
+        trees = self._trees
 
-        for tree_index, tree in enumerate(self._trees):
+        # Remove per-element np.clip: use np.maximum after vectorized computation.
+        # However, tree.get_marginal_variance(raw_features) must be called per tree.
+
+        # To optimize memory locality, fill a buffer, then np.maximum.
+        for tree_index, tree in enumerate(trees):
             marginal_variance = tree.get_marginal_variance(raw_features)
-            variances[tree_index] = np.clip(marginal_variance, 0.0, None)
+            variances[tree_index] = marginal_variance
+
+        # Replace per-element clip with a single vectorized operation
+        np.maximum(variances, 0.0, out=variances)
         self._variances[feature] = variances
