@@ -211,8 +211,20 @@ def _make_hovertext(param_name: str, importance: float, study: Study) -> str:
 
 
 def _get_hover_template(importances_info: _ImportancesInfo, study: Study) -> list[str]:
+    dist_map = {}
+    for trial in study.trials:
+        for param in trial.distributions:
+            if param not in dist_map:
+                dist_map[param] = trial.distributions[param]
+
+    def _make_hovertext_cached(param_name: str, importance: float) -> str:
+        dist = dist_map.get(param_name)
+        if dist is None:
+            dist = _get_distribution(param_name, study)
+        return "{} ({}): {}<extra></extra>".format(param_name, dist.__class__.__name__, importance)
+
     return [
-        _make_hovertext(param_name, importance, study)
+        _make_hovertext_cached(param_name, importance)
         for param_name, importance in zip(
             importances_info.param_names, importances_info.importance_values
         )
