@@ -48,14 +48,23 @@ class SPXCrossover(BaseCrossover):
 
         n = self.n_parents - 1
         G = np.mean(parents_params, axis=0)  # Equation (1).
-        rs = np.power(rng.rand(n), 1 / (np.arange(n) + 1))  # Equation (2).
+        rs = np.power(rng.rand(n), 1.0 / (np.arange(n) + 1))  # Equation (2).
 
         epsilon = np.sqrt(len(search_space_bounds) + 2) if self._epsilon is None else self._epsilon
-        xks = [G + epsilon * (pk - G) for pk in parents_params]  # Equation (3).
 
-        ck = 0  # Equation (4).
-        for k in range(1, self.n_parents):
-            ck = rs[k - 1] * (xks[k - 1] - xks[k] + ck)
+        # Vectorized computation for xks
+        xks = G + epsilon * (parents_params - G)  # (n_parents, d)
+
+        # Vectorized computation for ck
+        # The original for-loop: for k in range(1, self.n_parents): ck = rs[k-1] * (xks[k-1] - xks[k] + ck)
+        # This can be vectorized as a right-to-left cumulative product
+        # We'll use reverse iteration and accumulate
+        # Initialize ck as zeros
+        d = G.shape
+        ck = np.zeros(d, dtype=parents_params.dtype)
+        for k in range(self.n_parents - 1, 0, -1):
+            idx = k - 1
+            ck = rs[idx] * (xks[idx] - xks[k] + ck)
 
         child_params = xks[-1] + ck  # Equation (5).
 
