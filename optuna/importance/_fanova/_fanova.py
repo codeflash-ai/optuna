@@ -22,6 +22,7 @@ import numpy as np
 
 from optuna._imports import try_import
 from optuna.importance._fanova._tree import _FanovaTree
+from sklearn.ensemble import RandomForestRegressor
 
 
 with try_import() as _imports:
@@ -100,9 +101,12 @@ class _Fanova:
             return
 
         raw_features = self._column_to_encoded_columns[feature]
-        variances = np.empty(len(self._trees), dtype=np.float64)
+        n_trees = len(self._trees)
+        variances = np.empty(n_trees, dtype=np.float64)
+        trees = self._trees
 
-        for tree_index, tree in enumerate(self._trees):
-            marginal_variance = tree.get_marginal_variance(raw_features)
-            variances[tree_index] = np.clip(marginal_variance, 0.0, None)
+        # Pull all tree.get_marginal_variance results into an array comprehension for improved CPU cache use
+        marginal_variances = [tree.get_marginal_variance(raw_features) for tree in trees]
+        # Use np.clip with vectorized operation rather than per-item loop assignment
+        np.clip(marginal_variances, 0.0, None, out=variances)
         self._variances[feature] = variances
