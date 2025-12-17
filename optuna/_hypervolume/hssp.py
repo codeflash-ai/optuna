@@ -21,24 +21,35 @@ def _solve_hssp_2d(
     sorted_indices = np.arange(rank_i_loss_vals.shape[0])
     sorted_loss_vals = rank_i_loss_vals.copy()
     # The diagonal points for each rectangular to calculate the hypervolume contributions.
-    rect_diags = np.repeat(reference_point[np.newaxis, :], n_trials, axis=0)
-    selected_indices = np.zeros(subset_size, dtype=int)
+    rect_diags = np.empty_like(sorted_loss_vals)
+    rect_diags[:] = reference_point
+    selected_indices = np.empty(subset_size, dtype=int)
     for i in range(subset_size):
-        contribs = np.prod(rect_diags - sorted_loss_vals, axis=-1)
+        # Avoid creating new arrays by reusing memory in place and vectorizing prod calculation
+        contribs = (rect_diags[:, 0] - sorted_loss_vals[:, 0]) * (rect_diags[:, 1] - sorted_loss_vals[:, 1])
         max_index = np.argmax(contribs)
         selected_indices[i] = rank_i_indices[sorted_indices[max_index]]
-        loss_vals = sorted_loss_vals[max_index].copy()
+        loss_vals = sorted_loss_vals[max_index]
 
-        keep = np.ones(n_trials - i, dtype=bool)
-        keep[max_index] = False
-        # Remove the chosen point.
-        sorted_indices = sorted_indices[keep]
-        rect_diags = rect_diags[keep]
-        sorted_loss_vals = sorted_loss_vals[keep]
-        # Update the diagonal points for each hypervolume contribution calculation.
-        rect_diags[:max_index, 0] = np.minimum(loss_vals[0], rect_diags[:max_index, 0])
-        rect_diags[max_index:, 1] = np.minimum(loss_vals[1], rect_diags[max_index:, 1])
-
+        # Remove selected entry using slicing/views, minimizing array copies
+        if n_trials - i - 1 > 0:
+            if max_index > 0:
+                rect_diags[:max_index, 0] = np.minimum(loss_vals[0], rect_diags[:max_index, 0])
+            if max_index < n_trials - i - 1:
+                rect_diags[max_index+1:, 1] = np.minimum(loss_vals[1], rect_diags[max_index+1:, 1])
+            # Remove selected point by slicing (faster than boolean indexing)
+            if max_index == 0:
+                sorted_indices = sorted_indices[1:]
+                rect_diags = rect_diags[1:]
+                sorted_loss_vals = sorted_loss_vals[1:]
+            elif max_index == n_trials - i - 1:
+                sorted_indices = sorted_indices[:-1]
+                rect_diags = rect_diags[:-1]
+                sorted_loss_vals = sorted_loss_vals[:-1]
+            else:
+                sorted_indices = np.concatenate((sorted_indices[:max_index], sorted_indices[max_index+1:]))
+                rect_diags = np.concatenate((rect_diags[:max_index], rect_diags[max_index+1:]))
+                sorted_loss_vals = np.concatenate((sorted_loss_vals[:max_index], sorted_loss_vals[max_index+1:]))
     return selected_indices
 
 
