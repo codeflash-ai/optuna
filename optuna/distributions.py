@@ -449,7 +449,7 @@ class IntLogUniformDistribution(IntDistribution):
         super().__init__(low=low, high=high, log=True, step=step)
 
     def _asdict(self) -> dict:
-        d = copy.deepcopy(self.__dict__)
+        d = self.__dict__.copy()
         d.pop("log")
         return d
 
@@ -462,9 +462,16 @@ def _categorical_choice_equal(
     This function can handle NaNs like np.float32("nan") other than float.
     """
 
-    value1_is_nan = isinstance(value1, Real) and math.isnan(float(value1))
-    value2_is_nan = isinstance(value2, Real) and math.isnan(float(value2))
-    return (value1 == value2) or (value1_is_nan and value2_is_nan)
+    # Fast equality check first (covers all types except NaN edge case)
+    if value1 == value2:
+        return True
+
+    # Optimize isinstance checks by combining them, avoids repeated calls
+    if not (isinstance(value1, Real) and isinstance(value2, Real)):
+        return False
+
+    # Directly check if both are NaN
+    return math.isnan(value1) and math.isnan(value2)
 
 
 class CategoricalDistribution(BaseDistribution):
